@@ -13,7 +13,10 @@ from dotenv import load_dotenv
 import sqlite3
 from contextlib import contextmanager
 import telegram
-from telegram import Update
+from telegram import Update, Bot
+import sys
+import importlib.util
+from telegram.ext import ApplicationBuilder, ContextTypes
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()
@@ -441,22 +444,25 @@ async def get_analytics(period: str = "month", api_key: Optional[str] = None):
 async def telegram_webhook(request: Request):
     """Обрабатывает вебхуки от телеграм бота"""
     try:
-        data = await request.json()
+        update_data = await request.json()
         
-        # Получаем сообщение
-        message = data.get("message", {})
-        if not message:
-            return {"status": "error", "message": "Сообщение не найдено"}
+        # Проверяем, есть ли сообщение в обновлении
+        if "message" not in update_data:
+            return {"status": "success", "message": "Не является текстовым сообщением"}
         
-        # Получаем текст сообщения
-        text = message.get("text", "")
-        if not text:
+        message = update_data["message"]
+        
+        # Проверяем наличие текста в сообщении
+        if "text" not in message or not message["text"]:
             return {"status": "success", "message": "Сообщение без текста пропущено"}
         
         # Обрабатываем команды
+        text = message["text"]
         if text.startswith("/"):
             # Извлекаем команду (без символа /)
             command = text.split()[0][1:]
+            
+            # Вызываем обработчик команды
             await handle_command(command, message)
         
         return {"status": "success"}
@@ -490,16 +496,25 @@ async def get_telegram_users():
 async def setup_webhook():
     """Настраивает вебхук для бота"""
     try:
-        # Здесь должен быть публичный URL вашего приложения
-        webhook_url = "https://your-domain.com/telegram/webhook"
+        # Получаем URL сервиса из переменных окружения (Render.com автоматически устанавливает эту переменную)
+        render_external_url = os.getenv("RENDER_EXTERNAL_URL")
         
-        # Для локальной разработки можно использовать ngrok или аналогичный сервис
-        # webhook_url = "https://your-ngrok-url.ngrok.io/telegram/webhook"
-        
-        print(f"Настройка вебхука: {webhook_url}")
-        # Закомментировано до готовности публичного URL
-        # await bot.set_webhook(webhook_url)
-        print("⚠️ Вебхук не настроен - для работы используйте ручное тестирование через эндпоинт /telegram/webhook")
+        if render_external_url:
+            webhook_url = f"{render_external_url}/telegram/webhook"
+            print(f"Настройка вебхука на Render.com: {webhook_url}")
+            # Устанавливаем вебхук
+            response = requests.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook?url={webhook_url}"
+            )
+            print(f"Ответ Telegram API: {response.json()}")
+            
+            if response.status_code == 200 and response.json().get("ok"):
+                print("✅ Вебхук успешно настроен!")
+            else:
+                print(f"❌ Ошибка настройки вебхука: {response.json()}")
+        else:
+            print("⚠️ RENDER_EXTERNAL_URL не установлен. Невозможно настроить вебхук автоматически.")
+            print("⚠️ Вебхук не настроен - для работы используйте ручное тестирование через эндпоинт /telegram/webhook")
     except Exception as e:
         print(f"Ошибка настройки вебхука: {str(e)}")
 
@@ -507,7 +522,7 @@ async def setup_webhook():
 @app.on_event("startup")
 async def startup_event():
     """Запускает настройку вебхука при старте приложения"""
-    # await setup_webhook()
+    await setup_webhook()
     print("Приложение запущено. Используйте ручное тестирование через эндпоинт /telegram/webhook")
 
 # Удаляем вебхук при завершении работы приложения
