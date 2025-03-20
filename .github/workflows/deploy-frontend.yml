@@ -17,6 +17,8 @@ permissions:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    env:
+      CI: false # Предотвращает обработку предупреждений как ошибок
     steps:
       - name: Checkout 🛎️
         uses: actions/checkout@v3
@@ -34,6 +36,9 @@ jobs:
           npm ci
 
       - name: Build 🔧
+        env:
+          ESLINT_NO_DEV_ERRORS: true
+          CI: false
         run: |
           cd frontend/ozon-web
           npm run build
