@@ -43,18 +43,15 @@ const decryptTokens = (encryptedTokens: string): ApiTokens => {
   }
 };
 
-// Импортируем типы для Chart.js
-type ChartData = {
+// Импортируем типы для Chart.js (используется для типизации в компонентах диаграмм)
+interface ChartData {
   labels: string[];
   datasets: Array<{
     label: string;
     data: number[];
     backgroundColor?: string | string[];
-    borderColor?: string;
-    borderWidth?: number;
-    fill?: boolean;
   }>;
-};
+}
 
 // Компонент для отображения графика продаж
 const SalesChart = ({ data }: { data: number[] }) => {
@@ -376,12 +373,12 @@ const fetchApi = async (url: string, options?: RequestInit): Promise<any> => {
 
 function App() {
   // Telegram WebApp инициализация
-  useEffect(() => {
+  const initTelegramWebApp = () => {
     if (window.Telegram) {
       window.Telegram.WebApp.ready();
       window.Telegram.WebApp.expand();
     }
-  }, []);
+  };
 
   const [activeTab, setActiveTab] = useState('home');
   const [products, setProducts] = useState<Product[]>([]);
@@ -389,7 +386,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [reportStatus, setReportStatus] = useState<string | null>(null);
   const [telegramUser, setTelegramUser] = useState<{id: number, username?: string} | null>(null);
-  const [isApiAvailable, setIsApiAvailable] = useState<boolean>(true);
+  const [isApiAvailable, setIsApiAvailable] = useState<boolean>(false);
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() => {
     // Проверяем сохраненные настройки темы или используем системные настройки
     const savedTheme = localStorage.getItem('darkTheme');
@@ -451,34 +448,7 @@ function App() {
     roi_data: [] as number[]
   });
 
-  // Проверка доступности API при загрузке приложения
-  useEffect(() => {
-    const checkApi = async () => {
-      const isAvailable = await checkApiAvailability();
-      setIsApiAvailable(isAvailable);
-      if (!isAvailable) {
-        setError('API сервер недоступен. Пожалуйста, проверьте подключение и перезагрузите страницу.');
-      }
-    };
-    
-    checkApi();
-  }, []);
-
-  // Получение данных пользователя Telegram и токенов API
-  useEffect(() => {
-    // Получаем данные пользователя из Telegram WebApp
-    if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
-      const user = window.Telegram.WebApp.initDataUnsafe.user;
-      setTelegramUser({ id: user.id, username: user.username });
-      
-      // Получаем токены API для пользователя Telegram
-      if (isApiAvailable) {
-        fetchUserTokensFromBot(user.id);
-      }
-    }
-  }, [isApiAvailable]);
-
-  // Функция для получения токенов API от бота
+  // Функция для получения токенов API от бота (перемещена выше)
   const fetchUserTokensFromBot = (userId: number) => {
     setLoading(true);
     
@@ -506,21 +476,47 @@ function App() {
           setError('Токены API не найдены. Пожалуйста, введите токены в боте Telegram');
           setIsAuthenticated(false);
         }
+        setLoading(false);
       })
       .catch(err => {
-        if (err.message === 'API_UNAVAILABLE') {
-          setIsApiAvailable(false);
-          setError('API сервер недоступен. Работаем в оффлайн режиме с ограниченной функциональностью.');
-        } else {
-          console.error('Ошибка при загрузке токенов:', err);
-          setError(`Не удалось загрузить токены: ${err.message}. Пожалуйста, введите токены в боте Telegram`);
-          setIsAuthenticated(false);
-        }
-      })
-      .finally(() => {
+        console.error('Ошибка при получении токенов:', err);
+        setError('Ошибка при получении токенов API. Пожалуйста, попробуйте позже.');
+        setIsAuthenticated(false);
         setLoading(false);
       });
   };
+  
+  // Получение данных пользователя Telegram и токенов API
+  useEffect(() => {
+    // Проверяем, работает ли Telegram API и доступен ли пользователь
+    if (window.Telegram && window.Telegram.WebApp) {
+      const webapp = window.Telegram.WebApp;
+      const user = webapp.initDataUnsafe?.user;
+      
+      if (user) {
+        // Сохраняем информацию о пользователе Telegram
+        setTelegramUser({ id: user.id, username: user.username });
+      
+        // Получаем токены API для пользователя Telegram
+        if (isApiAvailable) {
+          fetchUserTokensFromBot(user.id);
+        }
+      }
+    }
+  }, [isApiAvailable]);
+
+  // Проверка доступности API при загрузке приложения
+  useEffect(() => {
+    const checkApi = async () => {
+      const isAvailable = await checkApiAvailability();
+      setIsApiAvailable(isAvailable);
+      if (!isAvailable) {
+        setError('API сервер недоступен. Пожалуйста, проверьте подключение и перезагрузите страницу.');
+      }
+    };
+    
+    checkApi();
+  }, []);
 
   useEffect(() => {
     if (activeTab === 'products' && isApiAvailable) {
