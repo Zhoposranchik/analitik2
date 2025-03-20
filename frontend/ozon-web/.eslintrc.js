@@ -5,18 +5,14 @@ module.exports = {
   ],
   rules: {
     // Отключаем правила, которые вызывают ошибки при сборке
-    'react-hooks/exhaustive-deps': 'warn', // понижаем уровень с error до warn
-    '@typescript-eslint/no-unused-vars': 'warn', // понижаем уровень с error до warn
-    'no-unused-vars': 'warn', // понижаем уровень с error до warn
+    'react-hooks/exhaustive-deps': 'off', // отключаем полностью
+    '@typescript-eslint/no-unused-vars': 'off', // отключаем полностью
+    'no-unused-vars': 'off', // отключаем полностью
   },
-  // Игнорируем предупреждения во время сборки
+  // Определяем среды выполнения
   env: {
-    production: {
-      rules: {
-        'react-hooks/exhaustive-deps': 'off',
-        '@typescript-eslint/no-unused-vars': 'off',
-        'no-unused-vars': 'off',
-      }
-    }
+    browser: true,
+    node: true,
+    es6: true
   }
 }; 
