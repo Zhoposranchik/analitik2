@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
+import { API_URL } from './config';
 // Импортируем Telegram WebApp API
 
 // Интерфейс для типизации продукта
@@ -343,13 +344,10 @@ const ROIChart = ({ data }: { data: number[] }) => {
   return <canvas ref={canvasRef} width={300} height={200} />;
 };
 
-// Базовый URL для API
-const API_BASE_URL = 'http://127.0.0.1:8002';
-
 // Функция для проверки доступности API
 const checkApiAvailability = async (): Promise<boolean> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/`);
+    const response = await fetch(`${API_URL}/`);
     return response.ok;
   } catch (error) {
     console.error('API недоступен:', error);
@@ -485,7 +483,7 @@ function App() {
     setLoading(true);
     
     // Получаем токены от API бэкенда по ID пользователя Telegram
-    fetchApi(`${API_BASE_URL}/telegram/user/${userId}/tokens`)
+    fetchApi(`${API_URL}/telegram/user/${userId}/tokens`)
       .then(data => {
         if (data.tokens) {
           const tokens: ApiTokens = {
@@ -532,7 +530,7 @@ function App() {
       // Получаем API ключ
       const apiKey = localStorage.getItem('apiKey');
       
-      fetchApi(`${API_BASE_URL}/products`, {
+      fetchApi(`${API_URL}/products`, {
         headers: {
           'X-API-Key': apiKey || ''
         }
@@ -590,7 +588,7 @@ function App() {
         period: selectedPeriod
       });
       
-      fetchApi(`${API_BASE_URL}/analytics?${params.toString()}`, {
+      fetchApi(`${API_URL}/analytics?${params.toString()}`, {
         headers: {
           'X-API-Key': localStorage.getItem('apiKey') || ''
         }
@@ -689,7 +687,7 @@ function App() {
     
     setReportStatus('Отправка отчета...');
     
-    fetchApi(`${API_BASE_URL}/send_report`, {
+    fetchApi(`${API_URL}/send_report`, {
       headers: {
         'X-API-Key': localStorage.getItem('apiKey') || ''
       }
@@ -778,7 +776,7 @@ function App() {
       params.append('api_key', apiKey);
     }
     
-    fetchApi(`${API_BASE_URL}/products?${params.toString()}`, {
+    fetchApi(`${API_URL}/products?${params.toString()}`, {
       headers: {
         'X-API-Key': apiKey || ''
       }
@@ -842,7 +840,7 @@ function App() {
     }
     
     // Попытка отправить данные на сервер
-    fetchApi(`${API_BASE_URL}/products/costs`, {
+    fetchApi(`${API_URL}/products/costs`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -894,7 +892,7 @@ function App() {
           </svg>
         ) : (
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 7a5 5 0 100 10 5 5 0 000-10zM12 2a1 1 0 011 1v2a1 1 0 11-2 0V3a1 1 0 011-1zm0 16a1 1 0 011 1v2a1 1 0 11-2 0v-2a1 1 0 011-1zM2 12a1 1 0 011-1h2a1 1 0 110 2H3a1 1 0 01-1-1zm16 0a1 1 0 011-1h2a1 1 0 110 2h-2a1 1 0 01-1-1zM4.929 5.343a1 1 0 011.414 0l1.414 1.414a1 1 0 01-1.414 1.414L4.93 6.757a1 1 0 010-1.414zm12.728 12.728a1 1 0 011.414 0l1.414 1.414a1 1 0 01-1.414 1.414l-1.414-1.414a1 1 0 010-1.414zM4.929 18.657a1 1 0 010-1.414l1.414-1.414a1 1 0 111.414 1.414l-1.414 1.414a1 1 0 01-1.414 0zm12.728-12.728a1 1 0 010-1.414l1.414-1.414a1 1 0 111.414 1.414l-1.414 1.414a1 1 0 01-1.414 0z" />
+            <path d="M12 7a5 5 0 100 10 5 5 0 000-10zM12 2a1 1 0 011 1v2a1 1 0 11-2 0V3a1 1 0 011-1zm0 16a1 1 0 011 1v2a1 1 0 11-2 0v-2a1 1 0 011-1zm2 0a1 1 0 011 1v2a1 1 0 11-2 0v-2a1 1 0 011-1zM2 12a1 1 0 011-1h2a1 1 0 110 2H3a1 1 0 01-1-1zm16 0a1 1 0 011-1h2a1 1 0 110 2h-2a1 1 0 01-1-1zM4.929 5.343a1 1 0 011.414 0l1.414 1.414a1 1 0 01-1.414 1.414L4.93 6.757a1 1 0 010-1.414zm12.728 12.728a1 1 0 011.414 0l1.414 1.414a1 1 0 01-1.414 1.414l-1.414-1.414a1 1 0 010-1.414zM4.929 18.657a1 1 0 010-1.414l1.414-1.414a1 1 0 111.414 1.414l-1.414 1.414a1 1 0 01-1.414 0zm12.728-12.728a1 1 0 010-1.414l1.414-1.414a1 1 0 111.414 1.414l-1.414 1.414a1 1 0 01-1.414 0z" />
           </svg>
         )}
       </div>

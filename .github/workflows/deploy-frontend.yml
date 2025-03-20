@@ -1,0 +1,46 @@
+name: Deploy Frontend to GitHub Pages
+
+on:
+  push:
+    branches: [ main, deploy ]
+    paths:
+      - 'frontend/**'
+  # Возможность запуска вручную из интерфейса GitHub
+  workflow_dispatch:
+
+# Права, необходимые для выполнения деплоя на GitHub Pages
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js ⚙️
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/ozon-web/package-lock.json'
+
+      - name: Install Dependencies 📦
+        run: |
+          cd frontend/ozon-web
+          npm ci
+
+      - name: Build 🔧
+        run: |
+          cd frontend/ozon-web
+          npm run build
+
+      - name: Deploy to GitHub Pages 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: frontend/ozon-web/build
+          branch: gh-pages
+          clean: true 

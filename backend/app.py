@@ -110,7 +110,11 @@ app = FastAPI()
 # Добавляем CORS middleware для работы с фронтендом
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене лучше указать конкретные домены
+    allow_origins=[
+        "https://zhoposranchik.github.io",  # GitHub Pages
+        "http://localhost:3000",            # Локальная разработка React
+        "http://127.0.0.1:3000"             # Альтернативный локальный URL
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
