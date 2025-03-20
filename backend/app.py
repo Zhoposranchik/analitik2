@@ -165,8 +165,32 @@ async def get_api_tokens(api_key: str = Depends(api_key_header)):
         raise HTTPException(status_code=401, detail=f"Ошибка аутентификации: {str(e)}")
 
 # Функции для работы с токенами
-def save_user_token(user_token: UserToken):
+async def save_user_token(user_id: int, api_token: str, client_id: str) -> bool:
     """Сохраняет токены пользователя в базу данных"""
+    try:
+        # Получаем имя пользователя (если оно было сохранено ранее)
+        username = None
+        user_token = await get_user_tokens(user_id)
+        if user_token:
+            username = user_token.username
+        
+        # Создаем объект с токенами
+        user_token = UserToken(
+            telegram_id=user_id,
+            username=username,
+            ozon_api_token=api_token,
+            ozon_client_id=client_id
+        )
+        
+        # Сохраняем в базу данных
+        save_user_token_db(user_token)
+        return True
+    except Exception as e:
+        print(f"Ошибка при сохранении токенов: {str(e)}")
+        return False
+
+def save_user_token_db(user_token: UserToken):
+    """Сохраняет токены пользователя в базу данных (внутренняя функция)"""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -176,27 +200,46 @@ def save_user_token(user_token: UserToken):
         ''', (user_token.telegram_id, user_token.username, user_token.ozon_api_token, user_token.ozon_client_id))
         conn.commit()
 
-def get_user_token(telegram_id: int) -> Optional[UserToken]:
-    """Получает токены пользователя из базы данных"""
+async def get_user_tokens(telegram_id: int) -> Optional[UserToken]:
+    """Получает токены пользователя из базы данных с дополнительной информацией"""
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM user_tokens WHERE telegram_id = ?', (telegram_id,))
+        cursor.execute('''
+            SELECT 
+                telegram_id, 
+                username, 
+                ozon_api_token, 
+                ozon_client_id, 
+                last_updated 
+            FROM user_tokens 
+            WHERE telegram_id = ?
+        ''', (telegram_id,))
         row = cursor.fetchone()
+        
         if row:
-            return UserToken(
-                telegram_id=row[1],
-                username=row[2],
-                ozon_api_token=row[3],
-                ozon_client_id=row[4]
+            # Создаем объект с токенами и дополнительными полями
+            token = UserToken(
+                telegram_id=row[0],
+                username=row[1],
+                ozon_api_token=row[2],
+                ozon_client_id=row[3]
             )
+            # Добавляем время последнего использования
+            setattr(token, 'last_used', row[4] if len(row) > 4 else None)
+            return token
         return None
 
-def delete_user_token(telegram_id: int):
+async def delete_user_tokens(telegram_id: int) -> bool:
     """Удаляет токены пользователя из базы данных"""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM user_tokens WHERE telegram_id = ?', (telegram_id,))
-        conn.commit()
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM user_tokens WHERE telegram_id = ?', (telegram_id,))
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"Ошибка при удалении токенов: {str(e)}")
+        return False
 
 # Инициализация бота
 try:
@@ -636,7 +679,7 @@ async def telegram_webhook(token: str, update: dict):
 @app.get("/telegram/user/{user_id}/tokens")
 async def get_telegram_user_tokens(user_id: int):
     """Получает API токены пользователя Telegram"""
-    user_token = get_user_token(user_id)
+    user_token = await get_user_tokens(user_id)
     
     if not user_token:
         raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены")
@@ -650,74 +693,91 @@ async def get_telegram_user_tokens(user_id: int):
 # Функция проверки актуальности токенов через API Ozon
 async def verify_ozon_tokens(api_token: str, client_id: str) -> tuple:
     """Проверяет валидность токенов Ozon, отправляя тестовый запрос к API"""
-    try:
-        # URL для тестового запроса (получение информации о категориях)
-        url = "https://api-seller.ozon.ru/v1/category/tree"
-        
-        # Заголовки запроса
-        headers = {
-            "Client-Id": client_id,
-            "Api-Key": api_token,
-            "Content-Type": "application/json"
+    # Список URL для проверки (от наиболее стабильных к менее стабильным)
+    check_urls = [
+        {
+            "url": "https://api-seller.ozon.ru/v2/product/list",
+            "method": "POST",
+            "payload": {"filter": {}, "limit": 1}
+        },
+        {
+            "url": "https://api-seller.ozon.ru/v1/warehouse/list",
+            "method": "POST",
+            "payload": {}
+        },
+        {
+            "url": "https://api-seller.ozon.ru/v3/product/info/list",
+            "method": "POST",
+            "payload": {"sku": []}
         }
-        
-        # Тело запроса (пустой объект для этого метода)
-        payload = {}
-        
-        # Записываем в лог информацию о запросе для отладки (без вывода полного токена)
-        print(f"Отправка запроса к Ozon API: URL={url}, Client-Id={client_id}, Api-Key={api_token[:5]}...{api_token[-5:] if len(api_token) > 10 else ''}")
-        
-        # Отправляем запрос с таймаутом
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        
-        # Записываем в лог ответ
-        print(f"Получен ответ от Ozon API: Статус={response.status_code}")
-        
-        # Проверяем статус ответа
-        if response.status_code == 200:
-            print("Токены валидны, получен успешный ответ")
-            return True, "Токены действительны"
-        elif response.status_code == 404:
-            error_message = "Ошибка 404: API метод не найден. Возможно, URL запроса устарел или изменен."
-            print(error_message)
-            return False, error_message
-        elif response.status_code == 403:
-            error_message = "Ошибка 403: Доступ запрещен. Токены недействительны или не имеют необходимых прав."
-            print(error_message)
-            return False, error_message
-        elif response.status_code == 401:
-            error_message = "Ошибка 401: Не авторизован. Проверьте правильность API токена и Client ID."
-            print(error_message)
-            return False, error_message
-        else:
-            # Пытаемся извлечь описание ошибки из ответа JSON
-            error_detail = ""
-            try:
-                error_json = response.json()
-                if 'error' in error_json:
-                    error_detail = f": {error_json['error']}"
-                elif 'message' in error_json:
-                    error_detail = f": {error_json['message']}"
-            except:
-                # Если не удалось распарсить JSON ответ
-                error_detail = f": {response.text[:100]}..." if len(response.text) > 100 else f": {response.text}"
+    ]
+    
+    # Заголовки запроса
+    headers = {
+        "Client-Id": client_id,
+        "Api-Key": api_token,
+        "Content-Type": "application/json"
+    }
+    
+    # Логируем для отладки (без полного токена)
+    safe_token = api_token[:5] + "..." + api_token[-5:] if len(api_token) > 10 else "***"
+    print(f"Проверка токенов: Client-Id={client_id}, Api-Key={safe_token}")
+    
+    # Проверяем каждый URL по очереди
+    for check in check_urls:
+        try:
+            url = check["url"]
+            method = check["method"]
+            payload = check["payload"]
             
-            error_message = f"Ошибка при проверке токенов: HTTP {response.status_code}{error_detail}"
-            print(error_message)
-            return False, error_message
+            print(f"Проверка через URL: {url}")
+            
+            # Отправляем запрос с таймаутом
+            response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                json=payload,
+                timeout=10
+            )
+            
+            print(f"Ответ: HTTP {response.status_code}")
+            
+            # Если получен успешный ответ (200 OK) или ошибка валидации данных (400),
+            # но не ошибка авторизации (401/403) - токены валидны
+            if response.status_code == 200:
+                print("Токены действительны (статус 200)")
+                return True, "Токены действительны"
+            elif response.status_code == 400:
+                # 400 может означать ошибку в параметрах, но токены могут быть валидны
+                try:
+                    error_json = response.json()
+                    if 'error' in error_json and ('unauthorized' in error_json['error'].lower() or 'авторизац' in error_json['error'].lower()):
+                        continue  # Проблема с авторизацией, пробуем следующий URL
+                    
+                    # Если дошли сюда, значит это 400 ошибка параметров, но токены валидны
+                    print("Токены действительны (параметры запроса неверны, но токены приняты)")
+                    return True, "Токены действительны"
+                except:
+                    # Не смогли распарсить JSON, считаем токены невалидными
+                    continue
+            
+            # Ошибки авторизации - явно указывают на невалидные токены
+            elif response.status_code in [401, 403]:
+                error_message = f"Ошибка авторизации: HTTP {response.status_code}. Проверьте правильность API токена и Client ID."
+                print(error_message)
+                return False, error_message
+            
+            # Для других ошибок пробуем следующий URL
         
-    except requests.exceptions.Timeout:
-        error_message = "Ошибка: Превышено время ожидания ответа от Ozon API. Проверьте подключение к интернету."
-        print(error_message)
-        return False, error_message
-    except requests.exceptions.ConnectionError:
-        error_message = "Ошибка соединения: Не удалось подключиться к Ozon API. Проверьте подключение к интернету."
-        print(error_message)
-        return False, error_message
-    except Exception as e:
-        error_message = f"Неизвестная ошибка при проверке токенов: {str(e)}"
-        print(error_message)
-        return False, error_message
+        except Exception as e:
+            print(f"Ошибка при проверке через {url}: {str(e)}")
+            # Продолжаем со следующим URL
+    
+    # Если все URL проверены и ни один не подтвердил валидность токенов
+    error_message = "Не удалось проверить валидность токенов. Пожалуйста, убедитесь, что API токен и Client ID указаны правильно."
+    print(error_message)
+    return False, error_message
 
 # Обновляем функцию save_user_token для проверки токенов перед сохранением
 async def save_user_token_with_verification(user_token: UserToken) -> tuple:
@@ -733,7 +793,7 @@ async def save_user_token_with_verification(user_token: UserToken) -> tuple:
     
     # Если токены валидны, сохраняем в базу данных
     try:
-        save_user_token(user_token)
+        save_user_token_db(user_token)
         return True, "Токены успешно сохранены"
     except Exception as e:
         return False, f"Ошибка при сохранении токенов: {str(e)}"
@@ -768,7 +828,7 @@ async def verify_tokens(tokens: ApiTokens):
 @app.get("/api/auth/telegram/{telegram_id}")
 async def auth_by_telegram_id(telegram_id: int):
     """Авторизация по Telegram ID и получение токенов для фронтенда"""
-    user_token = get_user_token(telegram_id)
+    user_token = await get_user_tokens(telegram_id)
     
     if not user_token:
         raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены. Пожалуйста, установите токены через Telegram бота.")
@@ -914,7 +974,7 @@ async def get_products(period: str = "month", api_key: Optional[str] = None, tel
     """Получает список товаров с опциональной фильтрацией по периоду"""
     # Если передан telegram_id, получаем токены из базы данных
     if telegram_id:
-        user_token = get_user_token(telegram_id)
+        user_token = await get_user_tokens(telegram_id)
         if not user_token:
             raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены")
         
@@ -990,7 +1050,7 @@ async def get_analytics(period: str = "month", api_key: Optional[str] = None, te
     """Получает аналитику по товарам за период"""
     # Если передан telegram_id, получаем токены из базы данных
     if telegram_id:
-        user_token = get_user_token(telegram_id)
+        user_token = await get_user_tokens(telegram_id)
         if not user_token:
             raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены")
         
@@ -1158,7 +1218,7 @@ async def api_get_products(period: str = "month", telegram_id: Optional[int] = N
     
     if telegram_id:
         # Если передан telegram_id, получаем токены из базы данных
-        user_token = get_user_token(telegram_id)
+        user_token = await get_user_tokens(telegram_id)
         if not user_token:
             raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены")
         
@@ -1212,7 +1272,7 @@ async def api_get_analytics(period: str = "month", telegram_id: Optional[int] = 
     
     if telegram_id:
         # Если передан telegram_id, получаем токены из базы данных
-        user_token = get_user_token(telegram_id)
+        user_token = await get_user_tokens(telegram_id)
         if not user_token:
             raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены")
         
