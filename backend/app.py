@@ -213,16 +213,16 @@ except Exception as e:
 def get_main_keyboard():
     """Создает клавиатуру с основными командами"""
     keyboard = [
-        [KeyboardButton("/start"), KeyboardButton("/help")],
-        [KeyboardButton("/set_token"), KeyboardButton("/status")],
-        [KeyboardButton("/delete_tokens")]
+        [KeyboardButton("Запустить бота 🚀"), KeyboardButton("Помощь ❓")],
+        [KeyboardButton("Установить токены 🔑"), KeyboardButton("Проверить статус ℹ️")],
+        [KeyboardButton("Удалить токены ❌")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 # Функция для создания инлайн клавиатуры с кнопкой приложения
 def get_app_button():
     """Создает инлайн клавиатуру с кнопкой для открытия приложения"""
-    keyboard = [[InlineKeyboardButton("🚀 Открыть приложение", url="https://zhoposranchik.github.io/analitik2/")]]
+    keyboard = [[InlineKeyboardButton("🚀 Открыть приложение Ozon Analytics", url="https://zhoposranchik.github.io/analitik2/")]]
     return InlineKeyboardMarkup(keyboard)
 
 # Функция для настройки меню команд
@@ -230,11 +230,11 @@ async def setup_bot_commands():
     """Настраивает меню команд бота"""
     try:
         commands = [
-            BotCommand("start", "Начать работу с ботом"),
-            BotCommand("help", "Получить справку по командам"),
-            BotCommand("set_token", "Установить API токены Ozon"),
-            BotCommand("status", "Проверить статус API токенов"),
-            BotCommand("delete_tokens", "Удалить сохраненные API токены")
+            BotCommand("start", "Запустить бота"),
+            BotCommand("help", "Помощь и справка"),
+            BotCommand("set_token", "Установить токены Ozon"),
+            BotCommand("status", "Проверить статус"),
+            BotCommand("delete_tokens", "Удалить токены")
         ]
         
         response = requests.post(
@@ -256,6 +256,7 @@ async def handle_command(command, update_data):
         chat_id = update_data.get("chat", {}).get("id")
         user_id = update_data.get("from", {}).get("id")
         username = update_data.get("from", {}).get("username", "пользователь")
+        first_name = update_data.get("from", {}).get("first_name", username)
         text = update_data.get("text", "")
         
         # Создаем клавиатуру с кнопками
@@ -266,7 +267,7 @@ async def handle_command(command, update_data):
         if command == "start":
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"Привет, {username}! 👋\n\n"
+                text=f"Привет, {first_name}! 👋\n\n"
                      f"Я бот для работы с API Ozon. Я помогу вам анализировать данные с вашего магазина на Ozon, "
                      f"отслеживать продажи, управлять товарами и получать аналитику.\n\n"
                      f"Доступные команды:\n"
@@ -582,12 +583,25 @@ async def telegram_webhook(request: Request):
         
         # Обрабатываем команды
         text = message["text"]
+        
+        # Проверяем команды, начинающиеся с /
         if text.startswith("/"):
             # Извлекаем команду (без символа /)
             command = text.split()[0][1:]
-            
-            # Вызываем обработчик команды
             await handle_command(command, message)
+            return {"status": "success"}
+        
+        # Обрабатываем текстовые кнопки
+        command_map = {
+            "Запустить бота 🚀": "start",
+            "Помощь ❓": "help",
+            "Установить токены 🔑": "set_token",
+            "Проверить статус ℹ️": "status",
+            "Удалить токены ❌": "delete_tokens"
+        }
+        
+        if text in command_map:
+            await handle_command(command_map[text], message)
         
         return {"status": "success"}
     except Exception as e:
