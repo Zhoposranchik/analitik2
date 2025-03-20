@@ -81,6 +81,7 @@ class UserToken(BaseModel):
     username: Optional[str] = None
     ozon_api_token: str
     ozon_client_id: str
+    last_used: Optional[str] = None  # Добавляем поле для хранения времени последнего использования
 
 class ProductCost(BaseModel):
     product_id: int
@@ -305,6 +306,8 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = update.effective_user.id
     username = update.effective_user.username
     
+    print(f"Обрабатываю команду /{command} от пользователя {user_id}")
+    
     # Создаем клавиатуру
     reply_markup = ReplyKeyboardMarkup(
         [
@@ -340,22 +343,64 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     
     elif command == "set_token":
+        # Проверяем аргументы команды
+        args = update.message.text.split()
+        
+        if len(args) >= 3:
+            # Пользователь передал токены в команде
+            api_token = args[1]
+            client_id = args[2]
+            
+            print(f"Получены токены от пользователя {user_id}: API token={api_token[:5]}..., Client ID={client_id}")
+            
+            # Создаем объект с токенами
+            user_token = UserToken(
+                telegram_id=user_id,
+                username=username,
+                ozon_api_token=api_token,
+                ozon_client_id=client_id
+            )
+            
+            # Пытаемся сохранить токены в базу данных
+            try:
+                print("Сохраняю токены в базу данных...")
+                # Используем напрямую функцию для сохранения в БД
+                save_user_token_db(user_token)
+                
+                # Проверяем, что токены сохранились
+                saved_token = await get_user_tokens(user_id)
+                if saved_token:
+                    print(f"Токены успешно сохранены для пользователя {user_id}")
+                    
+                    # Отправляем сообщение об успешном сохранении
+                    await update.message.reply_text(
+                        "✅ API токены успешно сохранены!\n\n"
+                        "Теперь вы можете использовать веб-приложение для анализа данных вашего магазина Ozon.",
+                        reply_markup=reply_markup
+                    )
+                else:
+                    print(f"Ошибка: токены не найдены в БД после сохранения для пользователя {user_id}")
+                    
+                    # Отправляем сообщение об ошибке
+                    await update.message.reply_text(
+                        "❌ Произошла ошибка при сохранении токенов.\n\n"
+                        "Пожалуйста, попробуйте еще раз позже или обратитесь в поддержку.",
+                        reply_markup=reply_markup
+                    )
+            except Exception as e:
+                print(f"Ошибка при сохранении токенов: {type(e).__name__} - {str(e)}")
+                
+                # Отправляем сообщение об ошибке
+                await update.message.reply_text(
+                    f"❌ Произошла ошибка при сохранении токенов: {str(e)}\n\n"
+                    "Пожалуйста, попробуйте еще раз позже или обратитесь в поддержку.",
+                    reply_markup=reply_markup
+                )
+                
+            return
+        
         # Устанавливаем состояние пользователя
         user_states[user_id] = "waiting_for_api_token"
-        
-        # Инструкции по получению и установке токенов
-        await update.message.reply_text(
-            "🔑 *Настройка API токена и Client ID*\n\n"
-            "*Шаг 1:* Отправьте мне ваш API токен Ozon.\n\n"
-            "Чтобы получить API токен и Client ID:\n"
-            "1️⃣ Войдите в личный кабинет Ozon Seller: https://seller.ozon.ru\n"
-            "2️⃣ Перейдите в раздел *API интеграция*\n"
-            "3️⃣ Нажмите кнопку *Создать токен* и скопируйте его\n"
-            "4️⃣ Скопируйте также ваш *Client ID* из той же страницы\n\n"
-            "📋 Просто отправьте API токен в следующем сообщении:",
-            parse_mode="Markdown",
-            reply_markup=reply_markup
-        )
     
     elif command == "status":
         # Проверяем статус токенов пользователя
@@ -669,15 +714,15 @@ async def telegram_webhook_with_token(token: str, update: dict = None):
         user_id = update.get('message', {}).get('from', {}).get('id', 'неизвестно')
         print(f"Получено обновление #{update_id} от пользователя {user_id}: {message_text[:50]}...")
         
-        # Преобразуем dict в объект Update
-        update_obj = Update.from_dict(update)
+        # Используем правильный метод для создания объекта Update
+        update_obj = Update.de_json(data=update, bot=bot)
         
         # Создаем объект приложения и контекста
         application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
         context = CallbackContext(application)
         
         # Проверяем, что это сообщение (может быть другой тип обновления)
-        if update_obj.message:
+        if update_obj and update_obj.message:
             # Если это команда
             if update_obj.message.text and update_obj.message.text.startswith('/'):
                 await handle_command(update_obj, context)
@@ -719,8 +764,32 @@ async def telegram_webhook(request: Request):
             
         print(f"Получен вебхук через /telegram/webhook: {str(update_data)[:100]}...")
             
-        # Перенаправляем на обработчик с токеном
-        return await telegram_webhook_with_token(TELEGRAM_BOT_TOKEN, update_data)
+        # Создаем объект Update
+        try:
+            # В python-telegram-bot нужно использовать Update.de_json вместо from_dict
+            update_obj = Update.de_json(data=update_data, bot=bot)
+            
+            # Создаем объект приложения и контекста
+            application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+            context = CallbackContext(application)
+            
+            # Проверяем, что это сообщение (может быть другой тип обновления)
+            if update_obj and update_obj.message:
+                # Если это команда
+                if update_obj.message.text and update_obj.message.text.startswith('/'):
+                    await handle_command(update_obj, context)
+                # Если это обычный текст
+                elif update_obj.message.text:
+                    await handle_message(update_obj, context)
+                
+            return {"status": "ok", "message": "Обновление обработано"}
+        except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e)
+            print(f"Ошибка обработки Update: {error_type} - {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return {"status": "error", "error_type": error_type, "message": error_msg}
     except Exception as e:
         print(f"Ошибка обработки вебхука через /telegram/webhook: {str(e)}")
         import traceback
@@ -941,45 +1010,75 @@ async def verify_tokens(tokens: ApiTokens):
 @app.get("/api/auth/telegram/{telegram_id}")
 async def auth_by_telegram_id(telegram_id: int):
     """Авторизация по Telegram ID и получение токенов для фронтенда"""
-    user_token = await get_user_tokens(telegram_id)
-    
-    if not user_token:
-        raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены. Пожалуйста, установите токены через Telegram бота.")
-    
-    # Обновляем время последнего использования токенов
-    update_token_usage(telegram_id)
-    
-    # Генерируем API ключ для использования на фронтенде
-    api_key = f"tg-user-{telegram_id}-{datetime.now().timestamp()}"
-    user_hash = hashlib.sha256(api_key.encode()).hexdigest()
-    
-    # Создаем объект с токенами для сохранения
-    tokens = {
-        "ozon_api_token": user_token.ozon_api_token,
-        "ozon_client_id": user_token.ozon_client_id,
-        "telegram_id": telegram_id
-    }
-    
-    # Проверяем актуальность токенов
-    is_valid, message = await verify_ozon_tokens(user_token.ozon_api_token, user_token.ozon_client_id)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=f"Токены больше не действительны. Пожалуйста, обновите их через Telegram бота. Ошибка: {message}")
-    
-    # Шифруем и сохраняем токены
-    encrypted_tokens = encrypt_tokens(tokens)
-    users_db[user_hash] = {
-        "tokens": encrypted_tokens,
-        "created_at": datetime.now().isoformat(),
-        "api_key": api_key,
-        "telegram_id": telegram_id
-    }
-    
-    return {
-        "api_key": api_key,
-        "message": "Авторизация успешна",
-        "ozon_api_token": user_token.ozon_api_token,
-        "ozon_client_id": user_token.ozon_client_id
-    }
+    try:
+        print(f"Попытка авторизации для telegram_id: {telegram_id}")
+        
+        user_token = await get_user_tokens(telegram_id)
+        
+        if not user_token:
+            print(f"Пользователь {telegram_id} не найден или нет токенов")
+            raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены. Пожалуйста, установите токены через Telegram бота.")
+        
+        print(f"Пользователь {telegram_id} найден, получены токены: {user_token.ozon_api_token[:5]}..., {user_token.ozon_client_id}")
+        
+        # Обновляем время последнего использования токенов
+        try:
+            update_token_usage(telegram_id)
+            print(f"Обновлено время использования токенов для {telegram_id}")
+        except Exception as e:
+            print(f"Ошибка при обновлении времени использования: {str(e)}")
+            # Продолжаем выполнение, так как это не критическая ошибка
+        
+        # Генерируем API ключ для использования на фронтенде
+        api_key = f"tg-user-{telegram_id}-{datetime.now().timestamp()}"
+        user_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        
+        # Создаем объект с токенами для сохранения
+        tokens = {
+            "ozon_api_token": user_token.ozon_api_token,
+            "ozon_client_id": user_token.ozon_client_id,
+            "telegram_id": telegram_id
+        }
+        
+        # Проверяем актуальность токенов
+        try:
+            is_valid, message = await verify_ozon_tokens(user_token.ozon_api_token, user_token.ozon_client_id)
+            if not is_valid:
+                print(f"Токены для {telegram_id} недействительны: {message}")
+                raise HTTPException(status_code=400, detail=f"Токены больше не действительны. Пожалуйста, обновите их через Telegram бота. Ошибка: {message}")
+            print(f"Токены для {telegram_id} действительны")
+        except Exception as e:
+            print(f"Ошибка при проверке токенов для {telegram_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Ошибка при проверке токенов: {str(e)}")
+        
+        # Шифруем и сохраняем токены
+        try:
+            encrypted_tokens = encrypt_tokens(tokens)
+            users_db[user_hash] = {
+                "tokens": encrypted_tokens,
+                "created_at": datetime.now().isoformat(),
+                "api_key": api_key,
+                "telegram_id": telegram_id
+            }
+            print(f"Токены успешно сохранены в кэше для {telegram_id}")
+        except Exception as e:
+            print(f"Ошибка при шифровании/сохранении токенов для {telegram_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Ошибка при шифровании токенов: {str(e)}")
+        
+        return {
+            "api_key": api_key,
+            "message": "Авторизация успешна",
+            "ozon_api_token": user_token.ozon_api_token,
+            "ozon_client_id": user_token.ozon_client_id
+        }
+    except HTTPException:
+        # Пробрасываем HTTPException дальше
+        raise
+    except Exception as e:
+        print(f"Неожиданная ошибка при авторизации через Telegram ID {telegram_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}")
 
 @app.get("/telegram/users")
 async def get_telegram_users():
@@ -1195,83 +1294,174 @@ async def get_analytics(period: str = "month", api_key: Optional[str] = None, te
 
 async def get_ozon_products(api_token: str, client_id: str):
     """Получает список товаров из API Ozon"""
-    try:
-        url = "https://api-seller.ozon.ru/v2/product/list"
-        
-        headers = {
-            "Client-Id": client_id,
-            "Api-Key": api_token,
-            "Content-Type": "application/json"
-        }
-        
-        # Получаем первую страницу товаров
-        payload = {
-            "filter": {
-                "visibility": "ALL"
-            },
-            "last_id": "",
-            "limit": 100
-        }
-        
-        response = requests.post(url, headers=headers, json=payload)
-        
-        if response.status_code != 200:
-            return None, f"Ошибка при получении товаров: {response.status_code} - {response.text}"
-        
-        data = response.json()
-        return data, "Товары успешно получены"
     
-    except Exception as e:
-        return None, f"Ошибка при получении товаров: {str(e)}"
+    # Проверка для тестовых токенов
+    if api_token.lower().startswith('test') or api_token.lower().startswith('demo'):
+        print(f"Используем тестовые данные для товаров (токен {api_token[:5]}...)")
+        # Возвращаем тестовые данные для демонстрации
+        return {
+            "result": {
+                "items": [
+                    {
+                        "product_id": 123456,
+                        "offer_id": "TEST-001",
+                        "name": "Тестовый товар 1",
+                        "price": "1990.00",
+                        "old_price": "2490.00",
+                        "premium_price": "1890.00",
+                        "stock": 10,
+                        "images": ["https://via.placeholder.com/200x200?text=TEST-001"],
+                        "rating": 4.7,
+                        "status": {
+                            "state_name": "Активен"
+                        }
+                    },
+                    {
+                        "product_id": 234567,
+                        "offer_id": "TEST-002",
+                        "name": "Тестовый товар 2",
+                        "price": "2490.00",
+                        "old_price": "2990.00",
+                        "premium_price": "2350.00",
+                        "stock": 5,
+                        "images": ["https://via.placeholder.com/200x200?text=TEST-002"],
+                        "rating": 4.3,
+                        "status": {
+                            "state_name": "Активен"
+                        }
+                    },
+                    {
+                        "product_id": 345678,
+                        "offer_id": "TEST-003",
+                        "name": "Тестовый товар 3",
+                        "price": "990.00",
+                        "old_price": "1190.00",
+                        "premium_price": "950.00",
+                        "stock": 0,
+                        "images": ["https://via.placeholder.com/200x200?text=TEST-003"],
+                        "rating": 4.1,
+                        "status": {
+                            "state_name": "Нет в наличии"
+                        }
+                    }
+                ],
+                "total": 3
+            }
+        }
+    
+    # Для реальных токенов используем API
+    url = "https://api-seller.ozon.ru/v2/product/list"
+    
+    headers = {
+        "Client-Id": client_id,
+        "Api-Key": api_token,
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "filter": {},
+        "limit": 100,
+        "page": 1
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Ошибка при получении списка товаров: {str(e)}")
+        status_code = getattr(e.response, 'status_code', None)
+        error_text = getattr(e.response, 'text', str(e))
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении товаров: {status_code} - {error_text}")
 
 async def get_ozon_analytics(api_token: str, client_id: str, period: str = "month"):
-    """Получает аналитику из API Ozon"""
-    try:
-        # Определяем даты для запроса в зависимости от периода
-        end_date = datetime.now()
-        
-        if period == "week":
-            start_date = end_date - timedelta(days=7)
-        elif period == "month":
-            start_date = end_date - timedelta(days=30)
-        elif period == "year":
-            start_date = end_date - timedelta(days=365)
-        else:  # По умолчанию месяц
-            start_date = end_date - timedelta(days=30)
-        
-        # Форматируем даты для API запроса
-        date_from = start_date.strftime("%Y-%m-%d")
-        date_to = end_date.strftime("%Y-%m-%d")
-        
-        # URL для запроса аналитики
-        url = "https://api-seller.ozon.ru/v1/analytics/dashboard/comments"
-        
-        # Заголовки запроса
-        headers = {
-            "Client-Id": client_id,
-            "Api-Key": api_token,
-            "Content-Type": "application/json"
-        }
-        
-        # Тело запроса
-        payload = {
-            "date_from": date_from,
-            "date_to": date_to,
-            "metrics": ["comments_count", "negative_comments_count", "rating"],
-            "dimension": ["sku"]
-        }
-        
-        # Отправляем запрос
-        response = requests.post(url, headers=headers, json=payload)
-        
-        if response.status_code != 200:
-            return None, f"Ошибка при получении аналитики: {response.status_code} - {response.text}"
-        
-        data = response.json()
-        return data, "Аналитика успешно получена"
+    """Получает аналитику продаж из API Ozon"""
     
+    # Для тестовых токенов возвращаем тестовые данные
+    if api_token.lower().startswith('test') or api_token.lower().startswith('demo'):
+        print(f"Используем тестовые данные для аналитики (токен {api_token[:5]}...)")
+        
+        # Возвращаем тестовые данные для демонстрации
+        return {
+            "status": "success",
+            "period": period,
+            "sales": 24500,
+            "margin": 23.5,
+            "roi": 42.8,
+            "profit": 8250,
+            "total_products": 36,
+            "active_products": 28,
+            "orders": 52,
+            "average_order": 3100,
+            "marketplace_fees": 3675,
+            "advertising_costs": 2200,
+            "sales_data": [15000, 18000, 22000, 24500, 20000, 23000, 24500],
+            "margin_data": [18.5, 20.2, 22.8, 24.1, 23.5, 24.0, 23.5],
+            "roi_data": [33.2, 38.5, 41.2, 43.7, 42.1, 42.5, 42.8]
+        }
+    
+    # Настройка периода для запроса
+    current_date = datetime.now()
+    
+    if period == "week":
+        # Последние 7 дней
+        date_from = (current_date - timedelta(days=7)).strftime("%Y-%m-%d")
+    elif period == "month":
+        # Последние 30 дней
+        date_from = (current_date - timedelta(days=30)).strftime("%Y-%m-%d")
+    elif period == "year":
+        # Последний год
+        date_from = (current_date - timedelta(days=365)).strftime("%Y-%m-%d")
+    else:
+        # По умолчанию - последние 30 дней
+        date_from = (current_date - timedelta(days=30)).strftime("%Y-%m-%d")
+    
+    date_to = current_date.strftime("%Y-%m-%d")
+    
+    # Получаем данные о финансах из Ozon API
+    try:
+        financial_data = await get_ozon_financial_data(api_token, client_id, period)
+        
+        # Формируем ответ на основе финансовых данных
+        return {
+            "status": "success",
+            "period": period,
+            "sales": financial_data.get("sales", 0),
+            "margin": financial_data.get("margin", 0),
+            "roi": financial_data.get("roi", 0),
+            "profit": financial_data.get("profit", 0),
+            "total_products": financial_data.get("total_products", 0),
+            "active_products": financial_data.get("active_products", 0),
+            "orders": financial_data.get("orders", 0),
+            "average_order": financial_data.get("average_order", 0),
+            "marketplace_fees": financial_data.get("marketplace_fees", 0),
+            "advertising_costs": financial_data.get("advertising_costs", 0),
+            "sales_data": financial_data.get("sales_data", []),
+            "margin_data": financial_data.get("margin_data", []),
+            "roi_data": financial_data.get("roi_data", [])
+        }
     except Exception as e:
-        return None, f"Ошибка при получении аналитики: {str(e)}"
+        print(f"Ошибка при получении аналитики: {str(e)}")
+        
+        # В случае ошибки возвращаем базовую структуру с сообщением об ошибке
+        return {
+            "error": True,
+            "message": f"Ошибка при получении аналитики: {str(e)}",
+            "period": period,
+            "sales": 0,
+            "margin": 0,
+            "roi": 0,
+            "profit": 0,
+            "total_products": 0,
+            "active_products": 0,
+            "orders": 0,
+            "average_order": 0,
+            "marketplace_fees": 0,
+            "advertising_costs": 0,
+            "sales_data": [],
+            "margin_data": [],
+            "roi_data": []
+        }
 
 async def get_ozon_financial_data(api_token: str, client_id: str, period: str = "month"):
     """Получает финансовые данные из API Ozon"""
@@ -1325,138 +1515,121 @@ async def get_ozon_financial_data(api_token: str, client_id: str, period: str = 
 @app.get("/api/products")
 async def api_get_products(period: str = "month", telegram_id: Optional[int] = None, api_key: Optional[str] = None):
     """API для получения списка товаров"""
-    # Проверяем и получаем токены
-    ozon_api_token = None
-    ozon_client_id = None
-    
-    if telegram_id:
-        # Если передан telegram_id, получаем токены из базы данных
+    # Получаем токены из API ключа или Telegram ID
+    if api_key:
+        # Используем API ключ
+        if api_key not in users_db_reverse:
+            raise HTTPException(status_code=401, detail="Недействительный API ключ")
+        
+        user_info = users_db[users_db_reverse[api_key]]
+        tokens = decrypt_tokens(user_info['tokens'])
+        
+        api_token = tokens['ozon_api_token']
+        client_id = tokens['ozon_client_id']
+    elif telegram_id:
+        # Используем Telegram ID
         user_token = await get_user_tokens(telegram_id)
         if not user_token:
             raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены")
         
-        ozon_api_token = user_token.ozon_api_token
-        ozon_client_id = user_token.ozon_client_id
-        
-        # Обновляем время последнего использования
-        update_token_usage(telegram_id)
-    
-    elif api_key:
-        # Если передан api_key, получаем токены из хранилища
-        try:
-            user_hash = hashlib.sha256(api_key.encode()).hexdigest()
-            if user_hash not in users_db:
-                raise HTTPException(status_code=404, detail="Пользователь не найден")
-            
-            encrypted_tokens = users_db[user_hash]["tokens"]
-            tokens = decrypt_tokens(encrypted_tokens)
-            
-            ozon_api_token = tokens.get("ozon_api_token")
-            ozon_client_id = tokens.get("ozon_client_id")
-            
-            # Если есть telegram_id в токенах, обновляем время использования
-            if "telegram_id" in tokens:
-                update_token_usage(tokens["telegram_id"])
-        
-        except Exception as e:
-            raise HTTPException(status_code=401, detail=f"Ошибка аутентификации: {str(e)}")
-    
+        api_token = user_token.ozon_api_token
+        client_id = user_token.ozon_client_id
     else:
         raise HTTPException(status_code=400, detail="Необходимо указать telegram_id или api_key")
     
-    # Проверяем наличие токенов
-    if not ozon_api_token or not ozon_client_id:
-        raise HTTPException(status_code=400, detail="Токены Ozon не найдены")
-    
-    # Получаем данные из API Ozon
-    data, message = await get_ozon_products(ozon_api_token, ozon_client_id)
-    
-    if not data:
-        raise HTTPException(status_code=500, detail=message)
-    
-    return data
+    try:
+        # Получаем список товаров с помощью API Ozon
+        products_data = await get_ozon_products(api_token, client_id)
+        
+        # Для тестовых данных не запрашиваем себестоимость, возвращаем фиктивные данные
+        if api_token.lower().startswith('test') or api_token.lower().startswith('demo'):
+            # Создаем тестовые данные о себестоимости
+            costs_mapping = {
+                "TEST-001": {"cost": 1500.0},
+                "TEST-002": {"cost": 1900.0},
+                "TEST-003": {"cost": 750.0}
+            }
+        else:
+            # Получаем сохраненные данные о себестоимости товаров
+            try:
+                costs_data = await get_product_costs(api_key=api_key)
+                costs_mapping = {}
+                
+                for cost in costs_data.get('items', []):
+                    costs_mapping[cost['offer_id']] = {
+                        'cost': cost['cost']
+                    }
+            except Exception as e:
+                print(f"Ошибка при получении себестоимости: {str(e)}")
+                costs_mapping = {}  # Если не удалось получить себестоимость, используем пустой словарь
+            
+        # Проходим по списку товаров и добавляем дополнительные данные
+        result_items = []
+        total = 0
+        
+        if 'result' in products_data and 'items' in products_data['result']:
+            total = products_data['result'].get('total', len(products_data['result']['items']))
+            
+            for item in products_data['result']['items']:
+                # Добавляем данные о себестоимости, если есть
+                offer_id = item.get('offer_id', '')
+                if offer_id in costs_mapping:
+                    cost = costs_mapping[offer_id]['cost']
+                    item['cost'] = cost
+                    
+                    # Рассчитываем маржинальность
+                    price = float(item.get('price', 0))
+                    if price > 0 and cost > 0:
+                        margin_percent = ((price - cost) / price) * 100
+                        item['margin_percent'] = round(margin_percent, 2)
+                    else:
+                        item['margin_percent'] = 0
+                else:
+                    item['cost'] = 0
+                    item['margin_percent'] = 0
+                
+                result_items.append(item)
+                
+        return {
+            "items": result_items,
+            "total": total,
+            "status": "success"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении товаров: {str(e)}")
 
 @app.get("/api/analytics")
 async def api_get_analytics(period: str = "month", telegram_id: Optional[int] = None, api_key: Optional[str] = None):
     """API для получения аналитики"""
-    # Проверяем и получаем токены
-    ozon_api_token = None
-    ozon_client_id = None
-    
-    if telegram_id:
-        # Если передан telegram_id, получаем токены из базы данных
+    # Получаем токены из API ключа или Telegram ID
+    if api_key:
+        # Используем API ключ
+        if api_key not in users_db_reverse:
+            raise HTTPException(status_code=401, detail="Недействительный API ключ")
+        
+        user_info = users_db[users_db_reverse[api_key]]
+        tokens = decrypt_tokens(user_info['tokens'])
+        
+        api_token = tokens['ozon_api_token']
+        client_id = tokens['ozon_client_id']
+    elif telegram_id:
+        # Используем Telegram ID
         user_token = await get_user_tokens(telegram_id)
         if not user_token:
             raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены")
         
-        ozon_api_token = user_token.ozon_api_token
-        ozon_client_id = user_token.ozon_client_id
-        
-        # Обновляем время последнего использования
-        update_token_usage(telegram_id)
-    
-    elif api_key:
-        # Если передан api_key, получаем токены из хранилища
-        try:
-            user_hash = hashlib.sha256(api_key.encode()).hexdigest()
-            if user_hash not in users_db:
-                raise HTTPException(status_code=404, detail="Пользователь не найден")
-            
-            encrypted_tokens = users_db[user_hash]["tokens"]
-            tokens = decrypt_tokens(encrypted_tokens)
-            
-            ozon_api_token = tokens.get("ozon_api_token")
-            ozon_client_id = tokens.get("ozon_client_id")
-            
-            # Если есть telegram_id в токенах, обновляем время использования
-            if "telegram_id" in tokens:
-                update_token_usage(tokens["telegram_id"])
-        
-        except Exception as e:
-            raise HTTPException(status_code=401, detail=f"Ошибка аутентификации: {str(e)}")
-    
+        api_token = user_token.ozon_api_token
+        client_id = user_token.ozon_client_id
     else:
         raise HTTPException(status_code=400, detail="Необходимо указать telegram_id или api_key")
     
-    # Проверяем наличие токенов
-    if not ozon_api_token or not ozon_client_id:
-        raise HTTPException(status_code=400, detail="Токены Ozon не найдены")
-    
-    # Получаем данные аналитики
-    analytics_data, analytics_message = await get_ozon_analytics(ozon_api_token, ozon_client_id, period)
-    financial_data, financial_message = await get_ozon_financial_data(ozon_api_token, ozon_client_id, period)
-    
-    # Если не удалось получить данные, используем заглушки с сообщением об ошибке
-    if not analytics_data:
-        # Заглушка для тестирования с сообщением об ошибке
-        mock_analytics = {
-            "error": True,
-            "message": analytics_message,
-            "period": period,
-            "sales": 24500,
-            "margin": 23.5,
-            "roi": 42.8,
-            "profit": 8250,
-            "total_products": 36,
-            "active_products": 28,
-            "orders": 52,
-            "average_order": 3100,
-            "marketplace_fees": 3675,
-            "advertising_costs": 2200,
-            "sales_data": [15000, 18000, 22000, 24500, 20000, 23000, 24500],
-            "margin_data": [18.5, 20.2, 22.8, 24.1, 23.5, 24.0, 23.5],
-            "roi_data": [33.2, 38.5, 41.2, 43.7, 42.1, 42.5, 42.8]
-        }
-        return mock_analytics
-    
-    # В реальном приложении здесь нужно обработать полученные данные и вернуть в нужном формате
-    
-    # Комбинируем данные из разных источников и возвращаем результат
-    combined_data = {
-        "success": True,
-        "period": period,
-        "analytics": analytics_data,
-        "financial": financial_data if financial_data else {"error": financial_message}
-    }
-    
-    return combined_data
+    try:
+        # Получаем аналитику с помощью API Ozon
+        analytics_data = await get_ozon_analytics(api_token, client_id, period)
+        
+        # Функция уже возвращает готовый результат
+        return analytics_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении аналитики: {str(e)}")
