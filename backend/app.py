@@ -249,7 +249,9 @@ async def setup_bot_commands():
     except Exception as e:
         print(f"Ошибка настройки меню команд: {str(e)}")
 
-# Обработчики команд Telegram бота
+# Добавляем простую систему состояний для диалога с пользователем
+user_states = {}  # Хранит текущее состояние диалога пользователя и промежуточные данные
+
 async def handle_command(command, update_data):
     """Обрабатывает команды от Telegram"""
     try:
@@ -265,6 +267,10 @@ async def handle_command(command, update_data):
         app_button = get_app_button()
         
         if command == "start":
+            # Сбрасываем состояние пользователя
+            if user_id in user_states:
+                del user_states[user_id]
+                
             await bot.send_message(
                 chat_id=chat_id,
                 text=f"Привет, {first_name}! 👋\n\n"
@@ -285,67 +291,28 @@ async def handle_command(command, update_data):
                 reply_markup=app_button
             )
         elif command == "set_token":
-            # Получаем аргументы команды
-            args = text.split()
-            if len(args) == 1:
-                # Только команда, без параметров - отправляем инструкцию
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="Для работы с API Ozon необходимо предоставить API ключ и Client ID.\n\n"
-                         "📝 *Как получить API ключ и Client ID:*\n"
-                         "1. Войдите в личный кабинет продавца Ozon\n"
-                         "2. Перейдите в раздел *API интеграция*\n"
-                         "3. Создайте новый ключ, если его еще нет\n"
-                         "4. Скопируйте Client ID и API ключ\n\n"
-                         "⚠️ *Важно:* Эти данные конфиденциальны и дают доступ к вашему магазину. "
-                         "Не сообщайте их третьим лицам!\n\n"
-                         "Формат команды:\n"
-                         "`/set_token OZON_API_TOKEN OZON_CLIENT_ID`\n\n"
-                         "Пример:\n"
-                         "`/set_token a1b2c3d4-e5f6-g7h8-i9j0 12345`",
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-                return
+            # Начинаем процесс установки токенов
+            user_states[user_id] = {"state": "waiting_for_api_token"}
             
-            if len(args) != 3:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="⚠️ Некорректный формат команды!\n\n"
-                         "Использование: `/set_token OZON_API_TOKEN OZON_CLIENT_ID`\n\n"
-                         "Пример: `/set_token a1b2c3d4-e5f6-g7h8-i9j0 12345`",
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-                return
-
-            ozon_api_token = args[1]
-            ozon_client_id = args[2]
-
-            # Сохраняем токены
-            user_token = UserToken(
-                telegram_id=user_id,
-                username=username,
-                ozon_api_token=ozon_api_token,
-                ozon_client_id=ozon_client_id
-            )
-            save_user_token(user_token)
-
             await bot.send_message(
                 chat_id=chat_id,
-                text="✅ API токены успешно сохранены!\n\n"
-                     "Теперь вы можете использовать веб-интерфейс для анализа данных вашего магазина Ozon.\n"
-                     "Ваши токены надежно сохранены и будут использоваться для авторизации API запросов.",
+                text="Для работы с API Ozon необходимо предоставить API ключ и Client ID.\n\n"
+                     "📝 *Как получить API ключ и Client ID:*\n"
+                     "1. Войдите в личный кабинет продавца Ozon\n"
+                     "2. Перейдите в раздел *API интеграция*\n"
+                     "3. Создайте новый ключ, если его еще нет\n"
+                     "4. Скопируйте Client ID и API ключ\n\n"
+                     "⚠️ *Важно:* Эти данные конфиденциальны и дают доступ к вашему магазину. "
+                     "Не сообщайте их третьим лицам!\n\n"
+                     "*Шаг 1:* Пришлите мне ваш API ключ (начинается с символов, похожих на `ffyvi-...`)",
+                parse_mode="Markdown",
                 reply_markup=keyboard
             )
-            
-            # Добавляем кнопку для открытия приложения после сохранения токенов
-            await bot.send_message(
-                chat_id=chat_id,
-                text="Нажмите кнопку ниже, чтобы открыть веб-интерфейс с вашими данными:",
-                reply_markup=app_button
-            )
         elif command == "status":
+            # Сбрасываем состояние пользователя
+            if user_id in user_states:
+                del user_states[user_id]
+                
             user_token = get_user_token(user_id)
             
             if user_token:
@@ -373,6 +340,10 @@ async def handle_command(command, update_data):
                     reply_markup=keyboard
                 )
         elif command == "delete_tokens":
+            # Сбрасываем состояние пользователя
+            if user_id in user_states:
+                del user_states[user_id]
+                
             delete_user_token(user_id)
             
             await bot.send_message(
@@ -383,6 +354,10 @@ async def handle_command(command, update_data):
                 reply_markup=keyboard
             )
         elif command == "help":
+            # Сбрасываем состояние пользователя
+            if user_id in user_states:
+                del user_states[user_id]
+                
             await bot.send_message(
                 chat_id=chat_id,
                 text="📚 *Справка по Ozon Bot*\n\n"
@@ -410,6 +385,10 @@ async def handle_command(command, update_data):
                 reply_markup=app_button
             )
         else:
+            # Сбрасываем состояние пользователя при неизвестной команде
+            if user_id in user_states:
+                del user_states[user_id]
+                
             await bot.send_message(
                 chat_id=chat_id,
                 text="🤔 Неизвестная команда. Используйте /help для получения списка доступных команд.",
@@ -423,6 +402,266 @@ async def handle_command(command, update_data):
                 text=f"Произошла ошибка при обработке команды: {str(e)}",
                 reply_markup=get_main_keyboard()
             )
+
+# Функция для обработки текстовых сообщений (не команд)
+async def handle_message(update_data):
+    """Обрабатывает обычные текстовые сообщения от пользователя"""
+    try:
+        chat_id = update_data.get("chat", {}).get("id")
+        user_id = update_data.get("from", {}).get("id")
+        username = update_data.get("from", {}).get("username", "пользователь")
+        first_name = update_data.get("from", {}).get("first_name", username)
+        text = update_data.get("text", "")
+        
+        # Создаем клавиатуру с кнопками
+        keyboard = get_main_keyboard()
+        # Создаем инлайн клавиатуру с кнопкой приложения
+        app_button = get_app_button()
+        
+        # Если пользователя нет в состояниях, значит это обычное сообщение
+        if user_id not in user_states:
+            await bot.send_message(
+                chat_id=chat_id,
+                text="Я не понимаю ваше сообщение. Пожалуйста, используйте кнопки или команды для взаимодействия со мной.",
+                reply_markup=keyboard
+            )
+            return
+        
+        # Обрабатываем сообщение в зависимости от состояния пользователя
+        user_state = user_states[user_id]
+        
+        if user_state["state"] == "waiting_for_api_token":
+            # Сохраняем API токен и запрашиваем Client ID
+            api_token = text.strip()
+            
+            # Простая проверка формата API токена
+            if not api_token or len(api_token) < 10:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text="⚠️ Некорректный формат API токена. Токен должен быть достаточно длинным.\n\n"
+                         "Пожалуйста, проверьте токен и отправьте его снова.",
+                    reply_markup=keyboard
+                )
+                return
+            
+            # Сохраняем API токен и переходим к запросу Client ID
+            user_states[user_id] = {
+                "state": "waiting_for_client_id",
+                "api_token": api_token
+            }
+            
+            await bot.send_message(
+                chat_id=chat_id,
+                text="✅ API токен получен.\n\n"
+                     "*Шаг 2:* Теперь пришлите мне ваш Client ID (обычно это числовое значение, например `12345`)",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        
+        elif user_state["state"] == "waiting_for_client_id":
+            # Сохраняем Client ID и завершаем процесс
+            client_id = text.strip()
+            api_token = user_state["api_token"]
+            
+            # Простая проверка формата Client ID
+            if not client_id or not client_id.isdigit():
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text="⚠️ Некорректный формат Client ID. Client ID должен быть числовым значением.\n\n"
+                         "Пожалуйста, проверьте ID и отправьте его снова.",
+                    reply_markup=keyboard
+                )
+                return
+            
+            # Сохраняем токены
+            user_token = UserToken(
+                telegram_id=user_id,
+                username=username,
+                ozon_api_token=api_token,
+                ozon_client_id=client_id
+            )
+            save_user_token(user_token)
+            
+            # Удаляем состояние пользователя, так как процесс завершен
+            del user_states[user_id]
+            
+            await bot.send_message(
+                chat_id=chat_id,
+                text="✅ Токены API Ozon успешно сохранены!\n\n"
+                     "Теперь вы можете использовать веб-интерфейс для анализа данных вашего магазина Ozon.\n"
+                     "Ваши токены надежно сохранены и будут использоваться для авторизации API запросов.",
+                reply_markup=keyboard
+            )
+            
+            # Добавляем кнопку для открытия приложения после сохранения токенов
+            await bot.send_message(
+                chat_id=chat_id,
+                text="Нажмите кнопку ниже, чтобы открыть веб-интерфейс с вашими данными:",
+                reply_markup=app_button
+            )
+    
+    except Exception as e:
+        print(f"Ошибка при обработке сообщения: {str(e)}")
+        if chat_id:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"Произошла ошибка при обработке сообщения: {str(e)}",
+                reply_markup=keyboard
+            )
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request):
+    """Обрабатывает вебхуки от телеграм бота"""
+    try:
+        update_data = await request.json()
+        
+        # Проверяем, есть ли сообщение в обновлении
+        if "message" not in update_data:
+            return {"status": "success", "message": "Не является текстовым сообщением"}
+        
+        message = update_data["message"]
+        
+        # Проверяем наличие текста в сообщении
+        if "text" not in message or not message["text"]:
+            return {"status": "success", "message": "Сообщение без текста пропущено"}
+        
+        # Получаем текст сообщения и информацию о пользователе
+        text = message["text"]
+        user_id = message["from"]["id"]
+        
+        # Проверяем команды, начинающиеся с /
+        if text.startswith("/"):
+            # Извлекаем команду (без символа /)
+            command = text.split()[0][1:]
+            await handle_command(command, message)
+            return {"status": "success"}
+        
+        # Обрабатываем текстовые кнопки
+        command_map = {
+            "Запустить бота 🚀": "start",
+            "Помощь ❓": "help",
+            "Установить токены 🔑": "set_token",
+            "Проверить статус ℹ️": "status",
+            "Удалить токены ❌": "delete_tokens"
+        }
+        
+        if text in command_map:
+            await handle_command(command_map[text], message)
+            return {"status": "success"}
+        
+        # Если это не команда и не кнопка, обрабатываем как обычное сообщение
+        # (например, для ввода токенов)
+        await handle_message(message)
+        
+        return {"status": "success"}
+    except Exception as e:
+        print(f"Ошибка обработки вебхука: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/telegram/user/{user_id}/tokens")
+async def get_telegram_user_tokens(user_id: int):
+    """Получает API токены пользователя Telegram"""
+    user_token = get_user_token(user_id)
+    
+    if not user_token:
+        raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены")
+    
+    # Возвращаем данные в формате, который ожидает фронтенд
+    return {
+        "ozon_api_token": user_token.ozon_api_token,
+        "ozon_client_id": user_token.ozon_client_id
+    }
+
+# Новый эндпоинт для фронтенда - получение токенов по Telegram ID
+@app.get("/api/auth/telegram/{telegram_id}")
+async def auth_by_telegram_id(telegram_id: int):
+    """Авторизация по Telegram ID и получение токенов для фронтенда"""
+    user_token = get_user_token(telegram_id)
+    
+    if not user_token:
+        raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены. Пожалуйста, установите токены через Telegram бота.")
+    
+    # Генерируем API ключ для использования на фронтенде
+    api_key = f"tg-user-{telegram_id}-{datetime.now().timestamp()}"
+    user_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    
+    # Создаем объект с токенами для сохранения
+    tokens = {
+        "ozon_api_token": user_token.ozon_api_token,
+        "ozon_client_id": user_token.ozon_client_id,
+        "telegram_id": telegram_id
+    }
+    
+    # Шифруем и сохраняем токены
+    encrypted_tokens = encrypt_tokens(tokens)
+    users_db[user_hash] = {
+        "tokens": encrypted_tokens,
+        "created_at": datetime.now().isoformat(),
+        "api_key": api_key,
+        "telegram_id": telegram_id
+    }
+    
+    return {
+        "api_key": api_key,
+        "message": "Авторизация успешна",
+        "ozon_api_token": user_token.ozon_api_token,
+        "ozon_client_id": user_token.ozon_client_id
+    }
+
+@app.get("/telegram/users")
+async def get_telegram_users():
+    """Получает список пользователей Telegram (только для админа)"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT telegram_id, username, created_at FROM user_tokens')
+        users = cursor.fetchall()
+        return {"users": [{"telegram_id": u[0], "username": u[1], "created_at": u[2]} for u in users]}
+
+# Инициализация и настройка вебхуков для Telegram бота
+async def setup_webhook():
+    """Настраивает вебхук для бота"""
+    try:
+        # Получаем URL сервиса из переменных окружения (Render.com автоматически устанавливает эту переменную)
+        render_external_url = os.getenv("RENDER_EXTERNAL_URL")
+        
+        if render_external_url:
+            webhook_url = f"{render_external_url}/telegram/webhook"
+            print(f"Настройка вебхука на Render.com: {webhook_url}")
+            # Устанавливаем вебхук
+            response = requests.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook?url={webhook_url}"
+            )
+            print(f"Ответ Telegram API: {response.json()}")
+            
+            if response.status_code == 200 and response.json().get("ok"):
+                print("✅ Вебхук успешно настроен!")
+            else:
+                print(f"❌ Ошибка настройки вебхука: {response.json()}")
+            
+            # Настраиваем меню команд
+            await setup_bot_commands()
+        else:
+            print("⚠️ RENDER_EXTERNAL_URL не установлен. Невозможно настроить вебхук автоматически.")
+            print("⚠️ Вебхук не настроен - для работы используйте ручное тестирование через эндпоинт /telegram/webhook")
+    except Exception as e:
+        print(f"Ошибка настройки вебхука: {str(e)}")
+
+# Запускаем настройку вебхука при старте приложения
+@app.on_event("startup")
+async def startup_event():
+    """Запускает настройку вебхука при старте приложения"""
+    await setup_webhook()
+    print("Приложение запущено. Используйте ручное тестирование через эндпоинт /telegram/webhook")
+
+# Удаляем вебхук при завершении работы приложения
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Удаляет вебхук при завершении работы приложения"""
+    try:
+        # await bot.delete_webhook()
+        print("Приложение остановлено")
+    except Exception as e:
+        print(f"Ошибка при удалении вебхука: {str(e)}")
 
 # Задачи, выполняющиеся в фоновом режиме
 async def send_notification(chat_id: str, message: str):
@@ -471,9 +710,16 @@ async def delete_tokens(api_key: str = Depends(api_key_header)):
     raise HTTPException(status_code=404, detail="Пользователь не найден")
 
 @app.get("/products")
-async def get_products(period: str = "month", api_key: Optional[str] = None):
+async def get_products(period: str = "month", api_key: Optional[str] = None, telegram_id: Optional[int] = None):
     """Получает список товаров с опциональной фильтрацией по периоду"""
-    # В реальном приложении здесь будет запрос к API Ozon с использованием токенов пользователя
+    # Если передан telegram_id, получаем токены из базы данных
+    if telegram_id:
+        user_token = get_user_token(telegram_id)
+        if not user_token:
+            raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены")
+        
+        # TODO: Здесь добавить логику запроса к API Ozon с полученными токенами
+        # В реальном проекте вместо mock_data будет использоваться API Ozon
     
     # Заглушка для тестирования
     mock_data = {
@@ -540,8 +786,17 @@ async def save_notification_settings(settings: NotificationSettings, api_key: st
     return {"message": "Настройки уведомлений сохранены"}
 
 @app.get("/analytics")
-async def get_analytics(period: str = "month", api_key: Optional[str] = None):
+async def get_analytics(period: str = "month", api_key: Optional[str] = None, telegram_id: Optional[int] = None):
     """Получает аналитику по товарам за период"""
+    # Если передан telegram_id, получаем токены из базы данных
+    if telegram_id:
+        user_token = get_user_token(telegram_id)
+        if not user_token:
+            raise HTTPException(status_code=404, detail="Пользователь не найден или не установлены API токены")
+        
+        # TODO: Здесь добавить логику запроса к API Ozon с полученными токенами
+        # В реальном проекте вместо mock_analytics будет использоваться API Ozon
+    
     # В реальном приложении здесь будет аналитика на основе данных Ozon API
     
     mock_analytics = {
@@ -562,116 +817,3 @@ async def get_analytics(period: str = "month", api_key: Optional[str] = None):
     }
     
     return mock_analytics
-
-# Новые эндпоинты для интеграции с Telegram
-
-@app.post("/telegram/webhook")
-async def telegram_webhook(request: Request):
-    """Обрабатывает вебхуки от телеграм бота"""
-    try:
-        update_data = await request.json()
-        
-        # Проверяем, есть ли сообщение в обновлении
-        if "message" not in update_data:
-            return {"status": "success", "message": "Не является текстовым сообщением"}
-        
-        message = update_data["message"]
-        
-        # Проверяем наличие текста в сообщении
-        if "text" not in message or not message["text"]:
-            return {"status": "success", "message": "Сообщение без текста пропущено"}
-        
-        # Обрабатываем команды
-        text = message["text"]
-        
-        # Проверяем команды, начинающиеся с /
-        if text.startswith("/"):
-            # Извлекаем команду (без символа /)
-            command = text.split()[0][1:]
-            await handle_command(command, message)
-            return {"status": "success"}
-        
-        # Обрабатываем текстовые кнопки
-        command_map = {
-            "Запустить бота 🚀": "start",
-            "Помощь ❓": "help",
-            "Установить токены 🔑": "set_token",
-            "Проверить статус ℹ️": "status",
-            "Удалить токены ❌": "delete_tokens"
-        }
-        
-        if text in command_map:
-            await handle_command(command_map[text], message)
-        
-        return {"status": "success"}
-    except Exception as e:
-        print(f"Ошибка обработки вебхука: {str(e)}")
-        return {"status": "error", "message": str(e)}
-
-@app.get("/telegram/user/{user_id}/tokens")
-async def get_telegram_user_tokens(user_id: int):
-    """Получает API токены пользователя Telegram"""
-    user_token = get_user_token(user_id)
-    
-    if not user_token:
-        return {"message": "Пользователь не найден или не установлены API токены"}
-    
-    return {
-        "tokens": user_token.dict(),
-        "created_at": user_token.created_at
-    }
-
-@app.get("/telegram/users")
-async def get_telegram_users():
-    """Получает список пользователей Telegram (только для админа)"""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT telegram_id, username, created_at FROM user_tokens')
-        users = cursor.fetchall()
-        return {"users": [{"telegram_id": u[0], "username": u[1], "created_at": u[2]} for u in users]}
-
-# Инициализация и настройка вебхуков для Telegram бота
-async def setup_webhook():
-    """Настраивает вебхук для бота"""
-    try:
-        # Получаем URL сервиса из переменных окружения (Render.com автоматически устанавливает эту переменную)
-        render_external_url = os.getenv("RENDER_EXTERNAL_URL")
-        
-        if render_external_url:
-            webhook_url = f"{render_external_url}/telegram/webhook"
-            print(f"Настройка вебхука на Render.com: {webhook_url}")
-            # Устанавливаем вебхук
-            response = requests.get(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook?url={webhook_url}"
-            )
-            print(f"Ответ Telegram API: {response.json()}")
-            
-            if response.status_code == 200 and response.json().get("ok"):
-                print("✅ Вебхук успешно настроен!")
-            else:
-                print(f"❌ Ошибка настройки вебхука: {response.json()}")
-            
-            # Настраиваем меню команд
-            await setup_bot_commands()
-        else:
-            print("⚠️ RENDER_EXTERNAL_URL не установлен. Невозможно настроить вебхук автоматически.")
-            print("⚠️ Вебхук не настроен - для работы используйте ручное тестирование через эндпоинт /telegram/webhook")
-    except Exception as e:
-        print(f"Ошибка настройки вебхука: {str(e)}")
-
-# Запускаем настройку вебхука при старте приложения
-@app.on_event("startup")
-async def startup_event():
-    """Запускает настройку вебхука при старте приложения"""
-    await setup_webhook()
-    print("Приложение запущено. Используйте ручное тестирование через эндпоинт /telegram/webhook")
-
-# Удаляем вебхук при завершении работы приложения
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Удаляет вебхук при завершении работы приложения"""
-    try:
-        # await bot.delete_webhook()
-        print("Приложение остановлено")
-    except Exception as e:
-        print(f"Ошибка при удалении вебхука: {str(e)}")
