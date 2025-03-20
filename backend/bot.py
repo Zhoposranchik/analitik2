@@ -27,6 +27,22 @@ def get_db():
     finally:
         conn.close()
 
+# Функция для инициализации базы данных
+def init_db():
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER UNIQUE,
+                username TEXT,
+                ozon_api_token TEXT,
+                ozon_client_id TEXT,
+                last_updated TIMESTAMP
+            )
+        ''')
+        conn.commit()
+
 def save_user_token(user_token: UserToken):
     """Сохраняет токены пользователя в базу данных"""
     with get_db() as conn:
@@ -115,6 +131,9 @@ def main():
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not bot_token:
         raise ValueError("Не установлена переменная окружения TELEGRAM_BOT_TOKEN")
+
+    # Инициализируем базу данных
+    init_db()
 
     # Создаем приложение
     application = telegram.ext.Application.builder().token(bot_token).build()

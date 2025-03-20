@@ -500,9 +500,55 @@ h1, h2, h3, h4 {
   
   .product {
     min-width: 700px;
+    font-size: 0.9em;
+  }
+  
+  .product-header {
+    font-size: 0.85em;
+    font-weight: bold;
+  }
+  
+  .product-name {
+    max-width: 150px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   
   .analytics-row {
     flex-direction: column;
+  }
+  
+  .analytics-card {
+    margin: 5px 0;
+    padding: 10px;
+  }
+  
+  .navbar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: var(--navbar-bg);
+    box-shadow: 0 -2px 5px var(--shadow-color);
+    z-index: 100;
+  }
+  
+  .app {
+    padding-bottom: 60px;
+  }
+}
+
+/* Запретить альбомную ориентацию для мобильных устройств */
+@media screen and (min-width: 320px) and (max-width: 767px) and (orientation: landscape) {
+  html {
+    transform: rotate(-90deg);
+    transform-origin: left top;
+    width: 100vh;
+    height: 100vw;
+    overflow-x: hidden;
+    position: absolute;
+    top: 100%;
+    left: 0;
   }
 }

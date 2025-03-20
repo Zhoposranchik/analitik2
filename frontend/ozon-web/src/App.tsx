@@ -945,8 +945,6 @@ function App() {
                 <div className="product-price">Цена (₽)</div>
                 <div className="product-cost">Себестоимость (₽)</div>
                 <div className="product-margin">Маржа (%)</div>
-                <div className="product-roi">ROI (%)</div>
-                <div className="product-profit">Прибыль (₽)</div>
               </div>
               {products.map(product => {
                 // Расчёт значений
@@ -964,7 +962,7 @@ function App() {
                 return (
                   <div key={product.product_id} className="product">
                     <div className="product-image">
-                      <img src={product.images[0]} alt={product.name} width="50" />
+                      <img src={product.images[0]} alt={product.name} width="40" />
                     </div>
                     <div className="product-name">{product.name}</div>
                     <div className="product-id">{product.offer_id}</div>
@@ -986,12 +984,6 @@ function App() {
                     </div>
                     <div className={`product-margin ${marginClass}`}>
                       {margin.toFixed(2)}%
-                    </div>
-                    <div className="product-roi">
-                      {roi.toFixed(2)}%
-                    </div>
-                    <div className="product-profit">
-                      {profit.toFixed(2)} ₽
                     </div>
                   </div>
                 );
@@ -1086,6 +1078,30 @@ function App() {
                     <div className="metric">
                       <span className="metric-label">Активные товары:</span>
                       <span className="metric-value">{analyticsData.active_products}</span>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">Средняя прибыль с товара:</span>
+                      <span className="metric-value">
+                        {analyticsData.total_products > 0 
+                          ? (analyticsData.profit / analyticsData.total_products).toFixed(2) 
+                          : '0.00'} ₽
+                      </span>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">Низкомаржинальные товары:</span>
+                      <span className="metric-value">
+                        {products.filter(p => {
+                          const cost = p.cost || 0;
+                          const revenue = p.price;
+                          const profit = revenue - cost;
+                          const margin = cost > 0 ? (profit / revenue) * 100 : 0;
+                          return margin < notificationThreshold;
+                        }).length}
+                      </span>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">Средний ROI:</span>
+                      <span className="metric-value">{analyticsData.roi.toFixed(2)}%</span>
                     </div>
                     <div className="metric">
                       <span className="metric-label">Заказы за период:</span>
