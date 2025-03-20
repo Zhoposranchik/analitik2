@@ -1,13 +1,14 @@
 import os
 from dotenv import load_dotenv
 import telegram
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, BotCommand
+from telegram.ext import CommandHandler, MessageHandler, filters
 import telegram.ext
 import asyncio
 import sqlite3
 from contextlib import contextmanager
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -76,20 +77,70 @@ def delete_user_token(telegram_id: int):
         cursor.execute('DELETE FROM user_tokens WHERE telegram_id = ?', (telegram_id,))
         conn.commit()
 
+def get_main_keyboard():
+    """Создает клавиатуру с основными командами"""
+    keyboard = [
+        [KeyboardButton('/start'), KeyboardButton('/help')],
+        [KeyboardButton('/set_token'), KeyboardButton('/status')],
+        [KeyboardButton('/delete_tokens')]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+async def set_bot_commands(bot):
+    """Устанавливает команды бота с описаниями"""
+    commands = [
+        BotCommand("start", "Начать работу с ботом и получить приветствие"),
+        BotCommand("help", "Получить справку по командам"),
+        BotCommand("set_token", "Установить API токены Ozon"),
+        BotCommand("status", "Проверить статус API токенов"),
+        BotCommand("delete_tokens", "Удалить сохраненные API токены")
+    ]
+    await bot.set_my_commands(commands)
+
 async def start(update: Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /start"""
     await update.message.reply_text(
-        f"Привет, {update.effective_user.username}! Я бот для работы с API Ozon.\n\n"
+        f"Привет, {update.effective_user.first_name}! 👋\n\n"
+        f"Я бот для работы с API Ozon. Я помогу вам анализировать данные с вашего магазина на Ozon, "
+        f"отслеживать продажи, управлять товарами и получать аналитику.\n\n"
+        f"Для начала работы установите API токены Ozon с помощью команды /set_token.\n\n"
         f"Доступные команды:\n"
-        f"/set_token OZON_API_TOKEN OZON_CLIENT_ID - установить API токены\n"
-        f"/status - проверить статус API токенов\n"
-        f"/delete_tokens - удалить API токены\n"
-        f"/help - показать справку"
+        f"🔑 /set_token - установить API токены\n"
+        f"ℹ️ /status - проверить статус API токенов\n"
+        f"❌ /delete_tokens - удалить API токены\n"
+        f"❓ /help - показать справку",
+        reply_markup=get_main_keyboard()
     )
 
 async def set_token(update: Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /set_token"""
     args = update.message.text.split()
+    if len(args) == 1:
+        # Пользователь ввел только команду без параметров
+        await update.message.reply_text(
+            "Для работы с API Ozon необходимо предоставить API ключ и Client ID.\n\n"
+            "📝 *Как получить API ключ и Client ID:*\n"
+            "1. Войдите в личный кабинет продавца Ozon\n"
+            "2. Перейдите в раздел *API интеграция*\n"
+            "3. Создайте новый ключ, если его еще нет\n"
+            "4. Скопируйте Client ID и API ключ\n\n"
+            "⚠️ *Важно:* Эти данные конфиденциальны и дают доступ к вашему магазину. "
+            "Не сообщайте их третьим лицам!\n\n"
+            "Формат команды:\n"
+            "`/set_token OZON_API_TOKEN OZON_CLIENT_ID`\n\n"
+            "Пример:\n"
+            "`/set_token a1b2c3d4-e5f6-g7h8-i9j0 12345`",
+            parse_mode="Markdown"
+        )
+        return
+
     if len(args) != 3:
-        await update.message.reply_text("Использование: /set_token OZON_API_TOKEN OZON_CLIENT_ID")
+        await update.message.reply_text(
+            "⚠️ Некорректный формат команды!\n\n"
+            "Использование: `/set_token OZON_API_TOKEN OZON_CLIENT_ID`\n\n"
+            "Пример: `/set_token a1b2c3d4-e5f6-g7h8-i9j0 12345`",
+            parse_mode="Markdown"
+        )
         return
 
     ozon_api_token = args[1]
@@ -103,27 +154,69 @@ async def set_token(update: Update, context: telegram.ext.ContextTypes.DEFAULT_T
     )
     save_user_token(user_token)
 
-    await update.message.reply_text("✅ API токены успешно сохранены!")
+    await update.message.reply_text(
+        "✅ API токены успешно сохранены!\n\n"
+        "Теперь вы можете использовать веб-интерфейс для анализа данных вашего магазина Ozon.\n"
+        "Ваши токены надежно сохранены и будут использоваться для авторизации API запросов.",
+        reply_markup=get_main_keyboard()
+    )
 
 async def status(update: Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /status"""
     user_token = get_user_token(update.effective_user.id)
     if user_token:
-        await update.message.reply_text("✅ API токены установлены")
+        await update.message.reply_text(
+            "✅ API токены установлены и готовы к использованию.\n\n"
+            f"Client ID: `{user_token.ozon_client_id}`\n"
+            f"API Token: `{user_token.ozon_api_token[:5]}...{user_token.ozon_api_token[-5:]}`\n\n"
+            "Веб-интерфейс должен работать корректно с этими токенами.",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
+        )
     else:
-        await update.message.reply_text("❌ API токены не установлены")
+        await update.message.reply_text(
+            "❌ API токены не установлены.\n\n"
+            "Пожалуйста, используйте команду /set_token для установки токенов Ozon API.",
+            reply_markup=get_main_keyboard()
+        )
 
 async def delete_tokens(update: Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /delete_tokens"""
     delete_user_token(update.effective_user.id)
-    await update.message.reply_text("✅ API токены удалены")
+    await update.message.reply_text(
+        "✅ API токены удалены.\n\n"
+        "Ваши данные больше не хранятся в системе. Для возобновления работы с веб-интерфейсом "
+        "необходимо заново установить токены с помощью команды /set_token.",
+        reply_markup=get_main_keyboard()
+    )
 
 async def help_command(update: Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /help"""
     await update.message.reply_text(
-        "Справка по командам:\n\n"
-        "/start - начать работу с ботом\n"
-        "/set_token OZON_API_TOKEN OZON_CLIENT_ID - установить API токены\n"
-        "/status - проверить статус API токенов\n"
-        "/delete_tokens - удалить API токены\n"
-        "/help - показать эту справку"
+        "📚 *Справка по Ozon Bot*\n\n"
+        "Бот предоставляет интерфейс для работы с API Ozon и позволяет анализировать "
+        "данные вашего магазина через удобный веб-интерфейс.\n\n"
+        "*Доступные команды:*\n\n"
+        "🚀 /start - начать работу с ботом\n"
+        "🔑 /set_token - установить API токены Ozon\n"
+        "ℹ️ /status - проверить статус API токенов\n"
+        "❌ /delete_tokens - удалить API токены\n"
+        "❓ /help - показать эту справку\n\n"
+        "*Как использовать:*\n"
+        "1. Получите API токен и Client ID в личном кабинете Ozon\n"
+        "2. Установите их с помощью команды /set_token\n"
+        "3. Перейдите в веб-интерфейс для работы с аналитикой\n\n"
+        "При возникновении проблем используйте команду /status для проверки настроек.",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+    )
+
+async def unknown_command(update: Update, context: telegram.ext.ContextTypes.DEFAULT_TYPE):
+    """Обработчик неизвестных команд"""
+    await update.message.reply_text(
+        "🤔 Извините, я не понимаю эту команду.\n"
+        "Используйте /help для получения списка доступных команд.",
+        reply_markup=get_main_keyboard()
     )
 
 def main():
@@ -138,12 +231,18 @@ def main():
     # Создаем приложение
     application = telegram.ext.Application.builder().token(bot_token).build()
 
+    # Устанавливаем команды бота с описаниями
+    application.post_init = set_bot_commands
+
     # Регистрируем обработчики
     application.add_handler(telegram.ext.CommandHandler("start", start))
     application.add_handler(telegram.ext.CommandHandler("set_token", set_token))
     application.add_handler(telegram.ext.CommandHandler("status", status))
     application.add_handler(telegram.ext.CommandHandler("delete_tokens", delete_tokens))
     application.add_handler(telegram.ext.CommandHandler("help", help_command))
+    
+    # Обработчик неизвестных команд (должен быть добавлен последним)
+    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
 
     # Запускаем бота
     print("Запуск бота...")
