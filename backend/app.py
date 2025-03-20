@@ -105,6 +105,7 @@ class TelegramUser(BaseModel):
 # Настройки Telegram бота (загружаем из переменных окружения)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+WEB_APP_URL = "https://t.me/xyezonbot/shmazon"
 
 if not TELEGRAM_BOT_TOKEN or not CHAT_ID:
     raise ValueError("Не установлены необходимые переменные окружения: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID")
@@ -266,7 +267,7 @@ def get_main_keyboard():
 # Функция для создания инлайн клавиатуры с кнопкой приложения
 def get_app_button():
     """Создает инлайн клавиатуру с кнопкой для открытия приложения"""
-    keyboard = [[InlineKeyboardButton("🚀 Открыть приложение Ozon Analytics", url="https://zhoposranchik.github.io/analitik2/")]]
+    keyboard = [[InlineKeyboardButton("🚀 Открыть приложение Ozon Analytics", url=WEB_APP_URL)]]
     return InlineKeyboardMarkup(keyboard)
 
 # Функция для настройки меню команд
