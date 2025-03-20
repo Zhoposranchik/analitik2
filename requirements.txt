@@ -1,11 +1,11 @@
 # Основные зависимости для бэкенда
-fastapi>=0.104.0
-uvicorn>=0.23.2
+fastapi==0.109.2
+uvicorn==0.27.1
 pydantic>=2.4.2
-python-telegram-bot>=20.6
-cryptography>=41.0.4
+python-telegram-bot==20.7
+cryptography==42.0.2
 requests>=2.31.0
-python-dotenv>=1.0.0
+python-dotenv==1.0.1
 
 # Дополнительные зависимости
 python-multipart>=0.0.6  # для загрузки файлов в FastAPI
@@ -14,5 +14,5 @@ jinja2>=3.1.2  # для шаблонов (если используются)
 aiofiles>=23.2.1  # для асинхронной работы с файлами
 
 # Зависимости для деплоя
-gunicorn>=21.2.0  # WSGI HTTP сервер для продакшена
-psycopg2-binary>=2.9.9  # для работы с PostgreSQL 
+gunicorn==21.2.0  # WSGI HTTP сервер для продакшена
+psycopg2-binary==2.9.9  # для работы с PostgreSQL 
