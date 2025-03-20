@@ -13,11 +13,12 @@ from dotenv import load_dotenv
 import sqlite3
 from contextlib import contextmanager
 import telegram
-from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton, BotCommand
+from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton, BotCommand, WebAppInfo
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import sys
 import importlib.util
 from telegram.ext import ApplicationBuilder, ContextTypes
+from telegram.ext import Application, CallbackContext
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()
@@ -102,10 +103,10 @@ class TelegramUser(BaseModel):
     api_tokens: Optional[ApiTokens] = None
 
 # Настройки Telegram бота (загружаем из переменных окружения)
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-if not BOT_TOKEN or not CHAT_ID:
+if not TELEGRAM_BOT_TOKEN or not CHAT_ID:
     raise ValueError("Не установлены необходимые переменные окружения: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID")
 
 # Создаем приложение
@@ -199,7 +200,7 @@ def delete_user_token(telegram_id: int):
 
 # Инициализация бота
 try:
-    bot = telegram.Bot(token=BOT_TOKEN)
+    bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
     print("Telegram бот успешно инициализирован")
 except Exception as e:
     print(f"Ошибка инициализации Telegram бота: {str(e)}")
@@ -240,7 +241,7 @@ async def setup_bot_commands():
         ]
         
         response = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands",
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands",
             json={"commands": [{"command": cmd.command, "description": cmd.description} for cmd in commands]}
         )
         
@@ -254,536 +255,382 @@ async def setup_bot_commands():
 # Добавляем простую систему состояний для диалога с пользователем
 user_states = {}  # Хранит текущее состояние диалога пользователя и промежуточные данные
 
-async def handle_command(command, update_data):
-    """Обрабатывает команды от Telegram"""
-    try:
-        chat_id = update_data.get("chat", {}).get("id")
-        user_id = update_data.get("from", {}).get("id")
-        username = update_data.get("from", {}).get("username", "пользователь")
-        first_name = update_data.get("from", {}).get("first_name", username)
+async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обрабатывает команды от пользователя"""
+    command = update.message.text.split()[0][1:]  # удаляем символ / и берем первое слово
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    # Создаем клавиатуру
+    reply_markup = ReplyKeyboardMarkup(
+        [
+            ["Установить токены 🔑", "Проверить статус ℹ️"],
+            ["Статистика 📊", "Помощь ❓"],
+            ["Удалить токены ❌"]
+        ],
+        resize_keyboard=True
+    )
+    
+    if command == "start":
+        # Сбрасываем состояние пользователя
+        user_states[user_id] = "idle"
         
-        # Создаем клавиатуру с кнопками
-        keyboard = get_main_keyboard()
-        # Создаем инлайн клавиатуру с кнопкой приложения
-        app_button = get_app_button()
+        # Приветственное сообщение
+        await update.message.reply_text(
+            f"👋 Привет! Я бот для мониторинга вашего магазина Ozon.\n\n"
+            "Для доступа к аналитике и управлению магазином вам нужно настроить токены API Ozon.\n\n"
+            "Используйте команду /set_token чтобы настроить API токен и Client ID.\n"
+            "Или нажмите кнопку ниже:",
+            reply_markup=reply_markup
+        )
         
-        # Обрабатываем команды
-        if command == "start":
-            # Сбрасываем состояние пользователя при начале работы с ботом
-            if user_id in user_states:
-                del user_states[user_id]
-            
-            welcome_message = (
-                f"👋 Привет, {first_name}!\n\n"
-                "Я бот для работы с API Ozon. Я помогу вам получать и анализировать данные вашего магазина на Ozon.\n\n"
-                "🔑 Для начала работы установите токены Ozon API с помощью команды /set_token\n"
-                "❓ Используйте /help для получения справки о доступных командах"
-            )
-            
-            await bot.send_message(
-                chat_id=chat_id,
-                text=welcome_message,
-                reply_markup=keyboard
-            )
+        # Создаем инлайн клавиатуру с кнопкой для открытия веб-приложения
+        app_button = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 Открыть веб-приложение", web_app=WebAppInfo(url=WEB_APP_URL))]
+        ])
         
-        elif command == "help":
-            # Сбрасываем состояние пользователя
-            if user_id in user_states:
-                del user_states[user_id]
-                
-            help_message = (
-                "📚 *Доступные команды:*\n\n"
-                "🚀 */start* - Начать работу с ботом\n"
-                "🔑 */set_token* - Установить API токен и Client ID Ozon\n"
-                "ℹ️ */status* - Проверить статус токенов\n"
-                "📊 */stats* - Получить базовую статистику по магазину\n"
-                "🔄 */verify* - Проверить валидность токенов\n"
-                "❌ */delete_tokens* - Удалить сохраненные токены\n"
-                "❓ */help* - Показать эту справку"
-            )
-            
-            await bot.send_message(
-                chat_id=chat_id,
-                text=help_message,
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
+        # Отправляем второе сообщение с кнопкой веб-приложения
+        await update.message.reply_text(
+            "Также вы можете сразу открыть веб-приложение:",
+            reply_markup=app_button
+        )
+    
+    elif command == "set_token":
+        # Устанавливаем состояние пользователя
+        user_states[user_id] = "waiting_for_api_token"
         
-        elif command == "set_token":
-            # Инициируем процесс установки токена
-            user_states[user_id] = {
-                "state": "waiting_for_api_token"
-            }
-            
-            instructions_message = (
-                "🔑 *Установка токенов API Ozon*\n\n"
-                "*Шаг 1:* Отправьте мне ваш API токен.\n\n"
-                "Как получить API токен и Client ID:\n"
-                "1️⃣ Войдите в [личный кабинет Ozon](https://seller.ozon.ru/)\n"
-                "2️⃣ Перейдите в раздел *API ключи* (в меню слева)\n"
-                "3️⃣ Создайте новый ключ, если у вас его еще нет\n"
-                "4️⃣ Скопируйте API-ключ и отправьте мне\n\n"
-                "Пример API-ключа: `a1b2c3de-f4g5-h6i7-j8k9-lmnopqrst012`\n\n"
-                "Просто скопируйте ваш API токен из личного кабинета Ozon и отправьте его в сообщении."
-            )
-            
-            # Отправляем инструкцию пользователю
-            await bot.send_message(
-                chat_id=chat_id,
-                text=instructions_message,
-                parse_mode="Markdown",
-                disable_web_page_preview=True,
-                reply_markup=keyboard
-            )
-            
-            # Добавляем поясняющее изображение, если оно есть
-            # await bot.send_photo(
-            #     chat_id=chat_id,
-            #     photo=open("path/to/api_token_screenshot.jpg", "rb"),
-            #     caption="Пример, где найти API токен в личном кабинете Ozon"
-            # )
+        # Инструкции по получению и установке токенов
+        await update.message.reply_text(
+            "🔑 *Настройка API токена и Client ID*\n\n"
+            "*Шаг 1:* Отправьте мне ваш API токен Ozon.\n\n"
+            "Чтобы получить API токен и Client ID:\n"
+            "1️⃣ Войдите в личный кабинет Ozon Seller: https://seller.ozon.ru\n"
+            "2️⃣ Перейдите в раздел *API интеграция*\n"
+            "3️⃣ Нажмите кнопку *Создать токен* и скопируйте его\n"
+            "4️⃣ Скопируйте также ваш *Client ID* из той же страницы\n\n"
+            "📋 Просто отправьте API токен в следующем сообщении:",
+            parse_mode="Markdown",
+            reply_markup=reply_markup
+        )
+    
+    elif command == "status":
+        # Проверяем статус токенов пользователя
+        tokens = await get_user_tokens(user_id)
         
-        elif command == "status":
-            # Сбрасываем состояние пользователя
-            if user_id in user_states:
-                del user_states[user_id]
-            
-            # Получаем информацию о токенах пользователя
-            user_token = get_user_token(user_id)
-            
-            if user_token:
-                status_message = (
-                    "✅ *Токены API установлены*\n\n"
-                    f"👤 Пользователь: `{username}` (ID: `{user_id}`)\n"
-                    f"🔑 Client ID: `{user_token.ozon_client_id}`\n"
-                    f"🔐 API Token: `{user_token.ozon_api_token[:5]}...{user_token.ozon_api_token[-5:]}`\n\n"
-                    "Вы можете использовать веб-интерфейс для анализа данных вашего магазина."
-                )
-                
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=status_message,
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-                
-                # Добавляем кнопку для открытия приложения
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="Открыть веб-интерфейс:",
-                    reply_markup=app_button
-                )
-            else:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="❌ API токены не установлены.\n\nИспользуйте команду /set_token для установки токенов Ozon API.",
-                    reply_markup=keyboard
-                )
-        
-        elif command == "delete_tokens":
-            # Сбрасываем состояние пользователя
-            if user_id in user_states:
-                del user_states[user_id]
-                
-            # Проверяем наличие токенов у пользователя
-            user_token = get_user_token(user_id)
-            
-            if user_token:
-                # Удаляем токены из базы данных
-                delete_user_token(user_id)
-                
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="✅ Токены API успешно удалены.",
-                    reply_markup=keyboard
-                )
-            else:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="ℹ️ У вас не было сохраненных токенов API.",
-                    reply_markup=keyboard
-                )
-        
-        elif command == "stats":
-            # Сбрасываем состояние пользователя
-            if user_id in user_states:
-                del user_states[user_id]
-                
-            user_token = get_user_token(user_id)
-            
-            if not user_token:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="❌ Невозможно получить статистику. API токены не установлены.\n\n"
-                         "Пожалуйста, используйте команду /set_token для установки токенов Ozon API.",
-                    reply_markup=keyboard
-                )
-                return
-            
-            await bot.send_message(
-                chat_id=chat_id,
-                text="🔄 Получаю статистику из Ozon API...",
-                reply_markup=keyboard
-            )
-            
-            # Получаем статистику из API Ozon
-            try:
-                analytics_data, analytics_message = await get_ozon_analytics(user_token.ozon_api_token, user_token.ozon_client_id)
-                financial_data, financial_message = await get_ozon_financial_data(user_token.ozon_api_token, user_token.ozon_client_id)
-                
-                if not analytics_data and not financial_data:
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=f"❌ Ошибка при получении данных из API Ozon:\n\n{analytics_message}\n\n{financial_message}",
-                        reply_markup=keyboard
-                    )
-                    return
-                
-                # Формируем сообщение со статистикой
-                stats_message = "📊 *Статистика вашего магазина на Ozon*\n\n"
-                
-                if financial_data:
-                    # Получаем финансовую информацию из ответа API
-                    try:
-                        balance = financial_data.get("result", {}).get("balance", 0)
-                        total_blocked = financial_data.get("result", {}).get("total_blocked", 0)
-                        
-                        stats_message += f"💰 *Финансы:*\n"
-                        stats_message += f"- Баланс: `{balance} ₽`\n"
-                        stats_message += f"- Заблокировано: `{total_blocked} ₽`\n\n"
-                    except Exception as e:
-                        stats_message += f"❌ Ошибка обработки финансовых данных: {str(e)}\n\n"
-                
-                if analytics_data:
-                    # Получаем аналитическую информацию из ответа API
-                    try:
-                        stats_message += f"⭐ *Отзывы:*\n"
-                        
-                        # Получаем общую информацию из аналитики
-                        if "result" in analytics_data and "data" in analytics_data["result"]:
-                            comments_data = analytics_data["result"]["data"]
-                            
-                            # Суммируем данные по всем товарам
-                            total_comments = 0
-                            total_negative = 0
-                            total_items = 0
-                            avg_rating = 0
-                            
-                            for item in comments_data:
-                                if "metrics" in item and "dimensions" in item:
-                                    total_items += 1
-                                    comments = item["metrics"].get("comments_count", 0)
-                                    negative = item["metrics"].get("negative_comments_count", 0)
-                                    rating = item["metrics"].get("rating", 0)
-                                    
-                                    total_comments += comments
-                                    total_negative += negative
-                                    avg_rating += rating
-                            
-                            if total_items > 0:
-                                avg_rating = avg_rating / total_items
-                                
-                                stats_message += f"- Всего отзывов: `{total_comments}`\n"
-                                stats_message += f"- Негативных отзывов: `{total_negative}`\n"
-                                stats_message += f"- Средний рейтинг: `{avg_rating:.1f}⭐`\n\n"
-                            else:
-                                stats_message += "- Нет данных по отзывам\n\n"
-                        else:
-                            stats_message += "- Нет данных по отзывам\n\n"
-                    except Exception as e:
-                        stats_message += f"❌ Ошибка обработки аналитических данных: {str(e)}\n\n"
-                
-                # Добавляем ссылку на веб-интерфейс
-                stats_message += "Для подробной статистики используйте веб-интерфейс."
-                
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=stats_message,
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-                
-                # Добавляем кнопку для открытия приложения
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="Открыть веб-интерфейс с подробной аналитикой:",
-                    reply_markup=app_button
-                )
-                
-            except Exception as e:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"❌ Ошибка при получении статистики: {str(e)}",
-                    reply_markup=keyboard
-                )
-        
-        elif command == "verify":
-            # Сбрасываем состояние пользователя
-            if user_id in user_states:
-                del user_states[user_id]
-                
-            user_token = get_user_token(user_id)
-            
-            if not user_token:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="❌ Невозможно проверить токены. API токены не установлены.\n\n"
-                         "Пожалуйста, используйте команду /set_token для установки токенов Ozon API.",
-                    reply_markup=keyboard
-                )
-                return
-            
-            await bot.send_message(
-                chat_id=chat_id,
-                text="🔄 Проверяю валидность токенов через API Ozon...",
-                reply_markup=keyboard
-            )
-            
-            # Проверяем токены
-            is_valid, message = await verify_ozon_tokens(user_token.ozon_api_token, user_token.ozon_client_id)
+        if tokens:
+            # Проверяем валидность токенов
+            is_valid, message = await verify_ozon_tokens(tokens.ozon_api_token, tokens.ozon_client_id)
             
             if is_valid:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="✅ Ваши токены API Ozon действительны и работают корректно!\n\n"
-                         f"Client ID: `{user_token.ozon_client_id}`\n"
-                         f"API Token: `{user_token.ozon_api_token[:5]}...{user_token.ozon_api_token[-5:]}`",
+                # Форматируем дату последнего использования
+                last_used = tokens.last_used
+                last_used_str = last_used.strftime("%d.%m.%Y %H:%M:%S") if last_used else "никогда"
+                
+                await update.message.reply_text(
+                    "✅ *Ваши токены активны и действительны*\n\n"
+                    f"API токен: `{tokens.ozon_api_token[:5]}...{tokens.ozon_api_token[-5:]}`\n"
+                    f"Client ID: `{tokens.ozon_client_id}`\n"
+                    f"Последнее использование: {last_used_str}\n\n"
+                    "Вы можете использовать веб-приложение для анализа данных или нажать /delete_tokens для удаления токенов.",
                     parse_mode="Markdown",
-                    reply_markup=keyboard
+                    reply_markup=reply_markup
                 )
             else:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"❌ Ошибка проверки токенов.\n\n{message}\n\n"
-                         "Возможно, ваши токены устарели или были отозваны. "
-                         "Пожалуйста, используйте команду /set_token для обновления токенов.",
-                    reply_markup=keyboard
+                await update.message.reply_text(
+                    f"⚠️ *Ваши токены недействительны*\n\n"
+                    f"Ошибка: {message}\n\n"
+                    "Рекомендуется установить новые токены с помощью команды /set_token",
+                    parse_mode="Markdown",
+                    reply_markup=reply_markup
                 )
-        
         else:
-            # Сбрасываем состояние пользователя при неизвестной команде
-            if user_id in user_states:
-                del user_states[user_id]
-                
-            await bot.send_message(
-                chat_id=chat_id,
-                text="🤔 Неизвестная команда. Используйте /help для получения списка доступных команд.",
-                reply_markup=keyboard
+            await update.message.reply_text(
+                "❌ У вас не настроены токены API Ozon.\n\n"
+                "Используйте команду /set_token чтобы настроить API токен и Client ID.",
+                reply_markup=reply_markup
             )
-    except Exception as e:
-        print(f"Ошибка при обработке команды {command}: {str(e)}")
-        if chat_id:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=f"Произошла ошибка при обработке команды: {str(e)}",
-                reply_markup=get_main_keyboard()
+    
+    elif command == "delete_tokens":
+        # Удаляем токены пользователя из базы данных
+        success = await delete_user_tokens(user_id)
+        
+        if success:
+            # Сбрасываем состояние пользователя
+            user_states[user_id] = "idle"
+            
+            await update.message.reply_text(
+                "✅ Ваши токены успешно удалены.\n\n"
+                "Вы можете установить новые токены с помощью команды /set_token.",
+                reply_markup=reply_markup
             )
-
-# Функция для обработки текстовых сообщений (не команд)
-async def handle_message(update_data):
-    """Обрабатывает обычные текстовые сообщения от пользователя"""
-    try:
-        chat_id = update_data.get("chat", {}).get("id")
-        user_id = update_data.get("from", {}).get("id")
-        username = update_data.get("from", {}).get("username", "пользователь")
-        first_name = update_data.get("from", {}).get("first_name", username)
-        text = update_data.get("text", "")
+        else:
+            await update.message.reply_text(
+                "❌ Произошла ошибка при удалении токенов.\n\n"
+                "Возможно, у вас нет сохраненных токенов.",
+                reply_markup=reply_markup
+            )
+    
+    elif command == "verify":
+        # Проверяем токены пользователя
+        tokens = await get_user_tokens(user_id)
         
-        # Создаем клавиатуру с кнопками
-        keyboard = get_main_keyboard()
-        # Создаем инлайн клавиатуру с кнопкой приложения
-        app_button = get_app_button()
+        if tokens:
+            # Отправляем сообщение о проверке
+            progress_message = await update.message.reply_text("🔄 Проверяем ваши токены, пожалуйста, подождите...")
+            
+            # Проверяем валидность токенов
+            is_valid, message = await verify_ozon_tokens(tokens.ozon_api_token, tokens.ozon_client_id)
+            
+            if is_valid:
+                # Обновляем сообщение с результатом проверки
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=progress_message.message_id,
+                    text="✅ Ваши токены действительны и активны.",
+                    reply_markup=reply_markup
+                )
+            else:
+                # Обновляем сообщение с ошибкой
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=progress_message.message_id,
+                    text=f"❌ Ошибка проверки токенов: {message}\n\n"
+                    "Рекомендуется установить новые токены с помощью команды /set_token",
+                    reply_markup=reply_markup
+                )
+        else:
+            await update.message.reply_text(
+                "❌ У вас не настроены токены API Ozon.\n\n"
+                "Используйте команду /set_token чтобы настроить API токен и Client ID.",
+                reply_markup=reply_markup
+            )
+    
+    elif command == "stats":
+        # Получаем статистику из Ozon API
+        tokens = await get_user_tokens(user_id)
         
-        # Если пользователя нет в состояниях, значит это обычное сообщение
-        if user_id not in user_states:
-            await bot.send_message(
-                chat_id=chat_id,
-                text="Я не понимаю ваше сообщение. Пожалуйста, используйте кнопки или команды для взаимодействия со мной.",
-                reply_markup=keyboard
+        if not tokens:
+            await update.message.reply_text(
+                "❌ У вас не настроены токены API Ozon.\n\n"
+                "Используйте команду /set_token чтобы настроить API токен и Client ID.",
+                reply_markup=reply_markup
             )
             return
         
-        # Обрабатываем сообщение в зависимости от состояния пользователя
-        user_state = user_states[user_id]
+        # Отправляем сообщение о загрузке статистики
+        progress_message = await update.message.reply_text("🔄 Загружаем данные из Ozon API, пожалуйста, подождите...")
         
-        if user_state["state"] == "waiting_for_api_token":
-            # Сохраняем API токен и запрашиваем Client ID
-            api_token = text.strip()
+        try:
+            # Получаем данные аналитики из API
+            data = await get_ozon_analytics(tokens.ozon_api_token, tokens.ozon_client_id)
             
-            # Очищаем токен от возможных кавычек, пробелов и других символов
-            api_token = api_token.replace('"', '').replace("'", "").strip()
-            
-            # Более гибкая проверка формата API токена
-            if not api_token:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="⚠️ Пожалуйста, отправьте ваш API токен.",
-                    reply_markup=keyboard
-                )
-                return
-            
-            # Минимальная длина для токена
-            if len(api_token) < 8:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="⚠️ Токен слишком короткий. Пожалуйста, проверьте API токен и отправьте его снова.\n\n"
-                         "API токен должен выглядеть примерно так: `ab12c3defghijk4lm5nop`",
+            if isinstance(data, dict) and "result" in data:
+                # Обрабатываем статистику
+                analytics = data["result"]
+                
+                # Формируем сообщение со статистикой
+                stats_message = "*📊 Статистика вашего магазина Ozon*\n\n"
+                
+                # Добавляем информацию о периоде
+                stats_message += f"📆 *Период:* {analytics.get('period', 'Текущий период')}\n\n"
+                
+                # Добавляем основные показатели
+                if 'metrics' in analytics:
+                    for metric in analytics['metrics']:
+                        name = metric.get('name', 'Показатель')
+                        value = metric.get('value', '0')
+                        stats_message += f"• *{name}:* {value}\n"
+                
+                # Обновляем сообщение со статистикой
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=progress_message.message_id,
+                    text=stats_message,
                     parse_mode="Markdown",
-                    reply_markup=keyboard
+                    reply_markup=reply_markup
                 )
-                return
-            
-            # Сохраняем API токен и переходим к запросу Client ID
-            user_states[user_id] = {
-                "state": "waiting_for_client_id",
-                "api_token": api_token
-            }
-            
-            await bot.send_message(
-                chat_id=chat_id,
-                text="✅ API токен получен.\n\n"
-                     "*Шаг 2:* Теперь пришлите мне ваш Client ID.\n"
-                     "Это обычно числовое значение, например `12345`.\n\n"
-                     "Просто скопируйте и отправьте Client ID из личного кабинета Ozon.",
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
-        
-        elif user_state["state"] == "waiting_for_client_id":
-            # Сохраняем Client ID и завершаем процесс
-            client_id = text.strip()
-            api_token = user_state["api_token"]
-            
-            # Очищаем client_id от возможных символов
-            client_id = client_id.replace('"', '').replace("'", "").strip()
-            
-            # Проверяем на наличие только цифр (удаляем все нецифровые символы)
-            client_id_cleaned = ''.join(char for char in client_id if char.isdigit())
-            
-            if not client_id_cleaned:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="⚠️ Не найдено числовое значение в вашем сообщении.\n\n"
-                         "Client ID должен содержать числа. Пожалуйста, проверьте ID и отправьте его снова.",
-                    reply_markup=keyboard
+            else:
+                # Если данные не получены или в неверном формате
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=progress_message.message_id,
+                    text="❌ Не удалось получить статистику из Ozon API.\n\n"
+                    "Возможно, ваши токены недействительны или произошла ошибка API.",
+                    reply_markup=reply_markup
                 )
-                return
-            
-            # Используем очищенный client_id
-            client_id = client_id_cleaned
-            
-            # Создаем объект с токенами
-            user_token = UserToken(
-                telegram_id=user_id,
-                username=username,
-                ozon_api_token=api_token,
-                ozon_client_id=client_id
-            )
-            
-            # Проверяем токены через API Ozon
-            await bot.send_message(
-                chat_id=chat_id,
-                text="🔄 Проверяю валидность токенов через API Ozon...",
-                reply_markup=keyboard
-            )
-            
-            is_valid, message = await verify_ozon_tokens(api_token, client_id)
-            
-            if not is_valid:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"❌ Ошибка проверки токенов.\n\n{message}\n\n"
-                         f"API токен: `{api_token[:5]}...{api_token[-5:]}`\n"
-                         f"Client ID: `{client_id}`\n\n"
-                         "Пожалуйста, проверьте токены и попробуйте еще раз с командой /set_token.",
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-                # Удаляем состояние пользователя из-за ошибки
-                del user_states[user_id]
-                return
-            
-            # Сохраняем токены если они валидны
-            save_user_token(user_token)
-            
-            # Удаляем состояние пользователя, так как процесс завершен
-            del user_states[user_id]
-            
-            await bot.send_message(
-                chat_id=chat_id,
-                text="✅ Токены API Ozon успешно проверены и сохранены!\n\n"
-                     f"API токен: `{api_token[:5]}...{api_token[-5:]}`\n"
-                     f"Client ID: `{client_id}`\n\n"
-                     "Теперь вы можете использовать веб-интерфейс для анализа данных вашего магазина Ozon.\n"
-                     "Ваши токены надежно сохранены и будут использоваться для авторизации API запросов.",
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
-            
-            # Добавляем кнопку для открытия приложения после сохранения токенов
-            await bot.send_message(
-                chat_id=chat_id,
-                text="Нажмите кнопку ниже, чтобы открыть веб-интерфейс с вашими данными:",
-                reply_markup=app_button
+        except Exception as e:
+            # Обновляем сообщение с ошибкой
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=progress_message.message_id,
+                text=f"❌ Ошибка при получении статистики: {str(e)}\n\n"
+                "Попробуйте позже или проверьте ваши токены с помощью команды /verify",
+                reply_markup=reply_markup
             )
     
-    except Exception as e:
-        print(f"Ошибка при обработке сообщения: {str(e)}")
-        if chat_id:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=f"Произошла ошибка при обработке сообщения: {str(e)}",
-                reply_markup=keyboard
-            )
+    elif command == "help" or command == "помощь":
+        # Выводим справку по доступным командам
+        await update.message.reply_text(
+            "🤖 *Справка по командам*\n\n"
+            "/start - Запустить бота\n"
+            "/set_token - Настроить API токен и Client ID\n"
+            "/status - Проверить статус ваших токенов\n"
+            "/verify - Проверить валидность ваших токенов\n"
+            "/stats - Получить статистику из Ozon API\n"
+            "/delete_tokens - Удалить сохраненные токены\n"
+            "/help - Показать это сообщение\n\n"
+            "Для начала работы настройте токены с помощью команды /set_token",
+            parse_mode="Markdown",
+            reply_markup=reply_markup
+        )
+    
+    elif command == "cancel":
+        # Сбрасываем состояние пользователя
+        user_states[user_id] = "idle"
+        
+        await update.message.reply_text(
+            "✅ Операция отменена.\n\n"
+            "Вы можете использовать другие команды или кнопки ниже:",
+            reply_markup=reply_markup
+        )
+    
+    else:
+        # Неизвестная команда
+        await update.message.reply_text(
+            "❓ Неизвестная команда. Используйте /help для получения справки по доступным командам.",
+            reply_markup=reply_markup
+        )
 
-@app.post("/telegram/webhook")
-async def telegram_webhook(request: Request):
-    """Обрабатывает вебхуки от телеграм бота"""
+# Функция для обработки текстовых сообщений (не команд)
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обрабатывает обычные текстовые сообщения от пользователя"""
+    user_id = update.effective_user.id
+    message_text = update.message.text.strip()
+
+    # Проверяем, есть ли пользователь в словаре состояний
+    if user_id not in user_states:
+        await update.message.reply_text(
+            "Для начала работы с ботом, пожалуйста, используйте команду /start"
+        )
+        return
+
+    current_state = user_states[user_id]
+    
+    # Если пользователь в состоянии ожидания API токена
+    if current_state == "waiting_for_api_token":
+        # Очищаем токен от кавычек и пробелов
+        cleaned_token = message_text.strip("\"' \t\n")
+        
+        # Пользователь слишком коротким ответом вводит токен
+        if len(cleaned_token) < 10:
+            await update.message.reply_text(
+                "❌ Некорректный формат API токена. Токен должен быть достаточно длинным.\n\n"
+                "🔑 API токен обычно имеет вид XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX\n\n"
+                "Пожалуйста, отправьте правильный API токен или используйте /cancel для отмены."
+            )
+            return
+        
+        # Сохраняем токен в состоянии пользователя
+        user_states[user_id] = {"state": "waiting_for_client_id", "api_token": cleaned_token}
+        
+        await update.message.reply_text(
+            "✅ API токен сохранен\n\n"
+            "Теперь, пожалуйста, отправьте ID клиента (Client ID).\n"
+            "Вы можете найти его в личном кабинете Ozon в разделе API."
+        )
+        return
+        
+    # Если пользователь в состоянии ожидания Client ID
+    elif isinstance(current_state, dict) and current_state.get("state") == "waiting_for_client_id":
+        # Очищаем от кавычек и пробелов
+        cleaned_client_id = message_text.strip("\"' \t\n")
+        
+        # Проверяем формат Client ID (допускаем только цифры)
+        if not cleaned_client_id.isdigit():
+            await update.message.reply_text(
+                "❌ Некорректный формат Client ID. ID клиента должен состоять только из цифр.\n\n"
+                "Пожалуйста, отправьте правильный Client ID или используйте /cancel для отмены."
+            )
+            return
+        
+        api_token = current_state.get("api_token", "")
+        
+        # Отправляем сообщение о проверке токенов
+        progress_message = await update.message.reply_text("🔄 Проверяем ваши токены, пожалуйста, подождите...")
+        
+        # Проверяем токены перед сохранением
+        is_valid, error_message = await verify_ozon_tokens(api_token, cleaned_client_id)
+        
+        if is_valid:
+            # Сохраняем токены в базу данных
+            success = await save_user_token(user_id, api_token, cleaned_client_id)
+            
+            if success:
+                # Очищаем состояние пользователя
+                user_states[user_id] = "idle"
+                
+                # Обновляем прогресс-сообщение
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=progress_message.message_id,
+                    text="✅ Токены успешно проверены и сохранены!\n\n"
+                    "Теперь вы можете использовать веб-приложение для анализа ваших товаров на Ozon."
+                )
+            else:
+                # Устанавливаем состояние ожидания API токена
+                user_states[user_id] = "waiting_for_api_token"
+                
+                # Обновляем прогресс-сообщение
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=progress_message.message_id,
+                    text="❌ Произошла ошибка при сохранении токенов. Пожалуйста, попробуйте еще раз."
+                )
+        else:
+            # Устанавливаем состояние ожидания API токена
+            user_states[user_id] = "waiting_for_api_token"
+            
+            # Обновляем прогресс-сообщение с подробной информацией об ошибке
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=progress_message.message_id,
+                text=f"❌ Ошибка проверки токенов: {error_message}\n\n"
+                "Пожалуйста, убедитесь, что вы правильно ввели API токен и Client ID. "
+                "Начните процесс заново с команды /set_token."
+            )
+        return
+    
+    # Для всех других состояний
+    await update.message.reply_text(
+        "Я не понимаю этой команды. Пожалуйста, используйте /help чтобы увидеть список доступных команд."
+    )
+
+@app.post("/webhook/{token}")
+async def telegram_webhook(token: str, update: dict):
+    """Обработчик вебхука от Telegram"""
+    if token != TELEGRAM_BOT_TOKEN:
+        return {"status": "error", "message": "Неверный токен бота"}
+    
     try:
-        update_data = await request.json()
+        # Преобразуем dict в объект Update
+        update_obj = Update.from_dict(update)
         
-        # Проверяем, есть ли сообщение в обновлении
-        if "message" not in update_data:
-            return {"status": "success", "message": "Не является текстовым сообщением"}
+        # Создаем объект приложения и контекста
+        application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        context = CallbackContext(application)
         
-        message = update_data["message"]
+        # Проверяем, что это сообщение (может быть другой тип обновления)
+        if update_obj.message:
+            # Если это команда
+            if update_obj.message.text and update_obj.message.text.startswith('/'):
+                await handle_command(update_obj, context)
+            # Если это обычный текст
+            elif update_obj.message.text:
+                await handle_message(update_obj, context)
         
-        # Проверяем наличие текста в сообщении
-        if "text" not in message or not message["text"]:
-            return {"status": "success", "message": "Сообщение без текста пропущено"}
-        
-        # Получаем текст сообщения и информацию о пользователе
-        text = message["text"]
-        user_id = message["from"]["id"]
-        
-        # Проверяем команды, начинающиеся с /
-        if text.startswith("/"):
-            # Извлекаем команду (без символа /)
-            command = text.split()[0][1:]
-            await handle_command(command, message)
-            return {"status": "success"}
-        
-        # Обрабатываем текстовые кнопки
-        command_map = {
-            "Запустить бота 🚀": "start",
-            "Помощь ❓": "help",
-            "Установить токены 🔑": "set_token",
-            "Проверить статус ℹ️": "status",
-            "Статистика 📊": "stats",
-            "Удалить токены ❌": "delete_tokens"
-        }
-        
-        if text in command_map:
-            await handle_command(command_map[text], message)
-            return {"status": "success"}
-        
-        # Если это не команда и не кнопка, обрабатываем как обычное сообщение
-        # (например, для ввода токенов)
-        await handle_message(message)
-        
-        return {"status": "success"}
+        return {"status": "ok"}
     except Exception as e:
-        print(f"Ошибка обработки вебхука: {str(e)}")
+        print(f"Ошибка при обработке вебхука: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 @app.get("/telegram/user/{user_id}/tokens")
@@ -817,18 +664,59 @@ async def verify_ozon_tokens(api_token: str, client_id: str) -> tuple:
         # Тело запроса (пустой объект для этого метода)
         payload = {}
         
-        # Отправляем запрос
-        response = requests.post(url, headers=headers, json=payload)
+        # Записываем в лог информацию о запросе для отладки (без вывода полного токена)
+        print(f"Отправка запроса к Ozon API: URL={url}, Client-Id={client_id}, Api-Key={api_token[:5]}...{api_token[-5:] if len(api_token) > 10 else ''}")
+        
+        # Отправляем запрос с таймаутом
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        
+        # Записываем в лог ответ
+        print(f"Получен ответ от Ozon API: Статус={response.status_code}")
         
         # Проверяем статус ответа
         if response.status_code == 200:
+            print("Токены валидны, получен успешный ответ")
             return True, "Токены действительны"
+        elif response.status_code == 404:
+            error_message = "Ошибка 404: API метод не найден. Возможно, URL запроса устарел или изменен."
+            print(error_message)
+            return False, error_message
+        elif response.status_code == 403:
+            error_message = "Ошибка 403: Доступ запрещен. Токены недействительны или не имеют необходимых прав."
+            print(error_message)
+            return False, error_message
+        elif response.status_code == 401:
+            error_message = "Ошибка 401: Не авторизован. Проверьте правильность API токена и Client ID."
+            print(error_message)
+            return False, error_message
+        else:
+            # Пытаемся извлечь описание ошибки из ответа JSON
+            error_detail = ""
+            try:
+                error_json = response.json()
+                if 'error' in error_json:
+                    error_detail = f": {error_json['error']}"
+                elif 'message' in error_json:
+                    error_detail = f": {error_json['message']}"
+            except:
+                # Если не удалось распарсить JSON ответ
+                error_detail = f": {response.text[:100]}..." if len(response.text) > 100 else f": {response.text}"
+            
+            error_message = f"Ошибка при проверке токенов: HTTP {response.status_code}{error_detail}"
+            print(error_message)
+            return False, error_message
         
-        error_message = f"Ошибка при проверке токенов: {response.status_code} - {response.text}"
+    except requests.exceptions.Timeout:
+        error_message = "Ошибка: Превышено время ожидания ответа от Ozon API. Проверьте подключение к интернету."
+        print(error_message)
         return False, error_message
-    
+    except requests.exceptions.ConnectionError:
+        error_message = "Ошибка соединения: Не удалось подключиться к Ozon API. Проверьте подключение к интернету."
+        print(error_message)
+        return False, error_message
     except Exception as e:
-        error_message = f"Ошибка при проверке токенов: {str(e)}"
+        error_message = f"Неизвестная ошибка при проверке токенов: {str(e)}"
+        print(error_message)
         return False, error_message
 
 # Обновляем функцию save_user_token для проверки токенов перед сохранением
@@ -941,7 +829,7 @@ async def setup_webhook():
             print(f"Настройка вебхука на Render.com: {webhook_url}")
             # Устанавливаем вебхук
             response = requests.get(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook?url={webhook_url}"
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={webhook_url}"
             )
             print(f"Ответ Telegram API: {response.json()}")
             
