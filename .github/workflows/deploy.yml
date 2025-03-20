@@ -1,0 +1,72 @@
+name: Deploy Ozon Bot
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.8'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Check backend
+      run: |
+        cd backend
+        python -c "import app; print('Backend check passed')"
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '16'
+    - name: Install dependencies
+      run: |
+        cd frontend/ozon-web
+        npm ci
+    - name: Build frontend
+      run: |
+        cd frontend/ozon-web
+        npm run build
+
+  deploy-render:
+    needs: [test-backend, test-frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy to Render
+      # Это действие активируется только при наличии соответствующего секрета
+      # и webhook в Render, настроенного на автоматический деплой при push
+      run: |
+        if [ -n "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        else
+          echo "Render deploy hook URL is not set. Skipping automatic deployment."
+        fi
+
+  deploy-netlify:
+    needs: [test-frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Deploy to Netlify
+      if: ${{ secrets.NETLIFY_AUTH_TOKEN != '' && secrets.NETLIFY_SITE_ID != '' }}
+      uses: netlify/actions/cli@master
+      with:
+        args: deploy --dir=frontend/ozon-web/build --prod
+      env:
+        NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }} 
