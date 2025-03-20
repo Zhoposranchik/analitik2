@@ -111,9 +111,11 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://zhoposranchik.github.io",  # GitHub Pages
-        "http://localhost:3000",            # Локальная разработка React
-        "http://127.0.0.1:3000"             # Альтернативный локальный URL
+        "https://zhoposranchik.github.io",            # Корневой домен GitHub Pages
+        "https://zhoposranchik.github.io/analitik2",  # Основной URL приложения
+        "https://zhoposranchik.github.io/analitik2/", # URL с завершающим слешем
+        "http://localhost:3000",                      # Локальная разработка React
+        "http://127.0.0.1:3000"                       # Альтернативный локальный URL
     ],
     allow_credentials=True,
     allow_methods=["*"],
