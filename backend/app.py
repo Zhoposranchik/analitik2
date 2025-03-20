@@ -14,6 +14,7 @@ import sqlite3
 from contextlib import contextmanager
 import telegram
 from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton, BotCommand
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import sys
 import importlib.util
 from telegram.ext import ApplicationBuilder, ContextTypes
@@ -218,6 +219,12 @@ def get_main_keyboard():
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+# Функция для создания инлайн клавиатуры с кнопкой приложения
+def get_app_button():
+    """Создает инлайн клавиатуру с кнопкой для открытия приложения"""
+    keyboard = [[InlineKeyboardButton("🚀 Открыть приложение", url="https://zhoposranchik.github.io/analitik2/")]]
+    return InlineKeyboardMarkup(keyboard)
+
 # Функция для настройки меню команд
 async def setup_bot_commands():
     """Настраивает меню команд бота"""
@@ -253,6 +260,8 @@ async def handle_command(command, update_data):
         
         # Создаем клавиатуру с кнопками
         keyboard = get_main_keyboard()
+        # Создаем инлайн клавиатуру с кнопкой приложения
+        app_button = get_app_button()
         
         if command == "start":
             await bot.send_message(
@@ -266,6 +275,13 @@ async def handle_command(command, update_data):
                      f"❌ /delete_tokens - удалить API токены\n"
                      f"❓ /help - показать справку",
                 reply_markup=keyboard
+            )
+            
+            # Отправляем отдельное сообщение с кнопкой для открытия приложения
+            await bot.send_message(
+                chat_id=chat_id,
+                text="Используйте кнопку ниже, чтобы открыть веб-интерфейс приложения:",
+                reply_markup=app_button
             )
         elif command == "set_token":
             # Получаем аргументы команды
@@ -321,6 +337,13 @@ async def handle_command(command, update_data):
                      "Ваши токены надежно сохранены и будут использоваться для авторизации API запросов.",
                 reply_markup=keyboard
             )
+            
+            # Добавляем кнопку для открытия приложения после сохранения токенов
+            await bot.send_message(
+                chat_id=chat_id,
+                text="Нажмите кнопку ниже, чтобы открыть веб-интерфейс с вашими данными:",
+                reply_markup=app_button
+            )
         elif command == "status":
             user_token = get_user_token(user_id)
             
@@ -333,6 +356,13 @@ async def handle_command(command, update_data):
                          "Веб-интерфейс должен работать корректно с этими токенами.",
                     parse_mode="Markdown",
                     reply_markup=keyboard
+                )
+                
+                # Добавляем кнопку для открытия приложения
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text="Теперь вы можете открыть приложение:",
+                    reply_markup=app_button
                 )
             else:
                 await bot.send_message(
@@ -370,6 +400,13 @@ async def handle_command(command, update_data):
                      "При возникновении проблем используйте команду /status для проверки настроек.",
                 parse_mode="Markdown",
                 reply_markup=keyboard
+            )
+            
+            # Добавляем кнопку для открытия приложения
+            await bot.send_message(
+                chat_id=chat_id,
+                text="Открыть веб-интерфейс приложения:",
+                reply_markup=app_button
             )
         else:
             await bot.send_message(
