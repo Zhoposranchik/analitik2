@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 import sqlite3
 from contextlib import contextmanager
 import telegram
-from telegram import Update, Bot
+from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton, BotCommand
 import sys
 import importlib.util
 from telegram.ext import ApplicationBuilder, ContextTypes
@@ -208,6 +208,40 @@ except Exception as e:
             print(f"[БОТ-ЗАГЛУШКА] Отправка сообщения в чат {chat_id}: {text}")
     bot = BotStub()
 
+# Функция для создания клавиатуры с кнопками
+def get_main_keyboard():
+    """Создает клавиатуру с основными командами"""
+    keyboard = [
+        [KeyboardButton("/start"), KeyboardButton("/help")],
+        [KeyboardButton("/set_token"), KeyboardButton("/status")],
+        [KeyboardButton("/delete_tokens")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+# Функция для настройки меню команд
+async def setup_bot_commands():
+    """Настраивает меню команд бота"""
+    try:
+        commands = [
+            BotCommand("start", "Начать работу с ботом"),
+            BotCommand("help", "Получить справку по командам"),
+            BotCommand("set_token", "Установить API токены Ozon"),
+            BotCommand("status", "Проверить статус API токенов"),
+            BotCommand("delete_tokens", "Удалить сохраненные API токены")
+        ]
+        
+        response = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands",
+            json={"commands": [{"command": cmd.command, "description": cmd.description} for cmd in commands]}
+        )
+        
+        if response.status_code == 200 and response.json().get("ok"):
+            print("✅ Меню команд успешно настроено!")
+        else:
+            print(f"❌ Ошибка настройки меню команд: {response.json()}")
+    except Exception as e:
+        print(f"Ошибка настройки меню команд: {str(e)}")
+
 # Обработчики команд Telegram бота
 async def handle_command(command, update_data):
     """Обрабатывает команды от Telegram"""
@@ -217,23 +251,54 @@ async def handle_command(command, update_data):
         username = update_data.get("from", {}).get("username", "пользователь")
         text = update_data.get("text", "")
         
+        # Создаем клавиатуру с кнопками
+        keyboard = get_main_keyboard()
+        
         if command == "start":
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"Привет, {username}! Я бот для работы с API Ozon.\n\n"
+                text=f"Привет, {username}! 👋\n\n"
+                     f"Я бот для работы с API Ozon. Я помогу вам анализировать данные с вашего магазина на Ozon, "
+                     f"отслеживать продажи, управлять товарами и получать аналитику.\n\n"
                      f"Доступные команды:\n"
-                     f"/set_token OZON_API_TOKEN OZON_CLIENT_ID - установить API токены\n"
-                     f"/status - проверить статус API токенов\n"
-                     f"/delete_tokens - удалить API токены\n"
-                     f"/help - показать справку"
+                     f"🔑 /set_token - установить API токены\n"
+                     f"ℹ️ /status - проверить статус API токенов\n"
+                     f"❌ /delete_tokens - удалить API токены\n"
+                     f"❓ /help - показать справку",
+                reply_markup=keyboard
             )
         elif command == "set_token":
             # Получаем аргументы команды
             args = text.split()
+            if len(args) == 1:
+                # Только команда, без параметров - отправляем инструкцию
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text="Для работы с API Ozon необходимо предоставить API ключ и Client ID.\n\n"
+                         "📝 *Как получить API ключ и Client ID:*\n"
+                         "1. Войдите в личный кабинет продавца Ozon\n"
+                         "2. Перейдите в раздел *API интеграция*\n"
+                         "3. Создайте новый ключ, если его еще нет\n"
+                         "4. Скопируйте Client ID и API ключ\n\n"
+                         "⚠️ *Важно:* Эти данные конфиденциальны и дают доступ к вашему магазину. "
+                         "Не сообщайте их третьим лицам!\n\n"
+                         "Формат команды:\n"
+                         "`/set_token OZON_API_TOKEN OZON_CLIENT_ID`\n\n"
+                         "Пример:\n"
+                         "`/set_token a1b2c3d4-e5f6-g7h8-i9j0 12345`",
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
+                )
+                return
+            
             if len(args) != 3:
                 await bot.send_message(
                     chat_id=chat_id,
-                    text="Использование: /set_token OZON_API_TOKEN OZON_CLIENT_ID"
+                    text="⚠️ Некорректный формат команды!\n\n"
+                         "Использование: `/set_token OZON_API_TOKEN OZON_CLIENT_ID`\n\n"
+                         "Пример: `/set_token a1b2c3d4-e5f6-g7h8-i9j0 12345`",
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
                 )
                 return
 
@@ -251,7 +316,10 @@ async def handle_command(command, update_data):
 
             await bot.send_message(
                 chat_id=chat_id,
-                text="✅ API токены успешно сохранены!"
+                text="✅ API токены успешно сохранены!\n\n"
+                     "Теперь вы можете использовать веб-интерфейс для анализа данных вашего магазина Ozon.\n"
+                     "Ваши токены надежно сохранены и будут использоваться для авторизации API запросов.",
+                reply_markup=keyboard
             )
         elif command == "status":
             user_token = get_user_token(user_id)
@@ -259,44 +327,63 @@ async def handle_command(command, update_data):
             if user_token:
                 await bot.send_message(
                     chat_id=chat_id,
-                    text="✅ API токены установлены\n"
-                         f"Username: {user_token.username}\n"
-                         f"Client ID: {user_token.ozon_client_id[:5]}...\n"
-                         f"API Token: {user_token.ozon_api_token[:5]}..."
+                    text="✅ API токены установлены и готовы к использованию.\n\n"
+                         f"Client ID: `{user_token.ozon_client_id}`\n"
+                         f"API Token: `{user_token.ozon_api_token[:5]}...{user_token.ozon_api_token[-5:]}`\n\n"
+                         "Веб-интерфейс должен работать корректно с этими токенами.",
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
                 )
             else:
                 await bot.send_message(
                     chat_id=chat_id,
-                    text="❌ API токены не установлены. Используйте /set_token для установки."
+                    text="❌ API токены не установлены.\n\n"
+                         "Пожалуйста, используйте команду /set_token для установки токенов Ozon API.",
+                    reply_markup=keyboard
                 )
         elif command == "delete_tokens":
             delete_user_token(user_id)
             
             await bot.send_message(
                 chat_id=chat_id,
-                text="✅ API токены успешно удалены"
+                text="✅ API токены успешно удалены.\n\n"
+                     "Ваши данные больше не хранятся в системе. Для возобновления работы с веб-интерфейсом "
+                     "необходимо заново установить токены с помощью команды /set_token.",
+                reply_markup=keyboard
             )
         elif command == "help":
             await bot.send_message(
                 chat_id=chat_id,
-                text="🤖 Справка по командам:\n\n"
-                     f"/start - начать работу с ботом\n"
-                     f"/set_token OZON_API_TOKEN OZON_CLIENT_ID - установить API токены\n"
-                     f"/status - проверить статус API токенов\n"
-                     f"/delete_tokens - удалить API токены\n"
-                     f"/help - показать эту справку"
+                text="📚 *Справка по Ozon Bot*\n\n"
+                     "Бот предоставляет интерфейс для работы с API Ozon и позволяет анализировать "
+                     "данные вашего магазина через удобный веб-интерфейс.\n\n"
+                     "*Доступные команды:*\n\n"
+                     "🚀 /start - начать работу с ботом\n"
+                     "🔑 /set_token - установить API токены Ozon\n"
+                     "ℹ️ /status - проверить статус API токенов\n"
+                     "❌ /delete_tokens - удалить API токены\n"
+                     "❓ /help - показать эту справку\n\n"
+                     "*Как использовать:*\n"
+                     "1. Получите API токен и Client ID в личном кабинете Ozon\n"
+                     "2. Установите их с помощью команды /set_token\n"
+                     "3. Перейдите в веб-интерфейс для работы с аналитикой\n\n"
+                     "При возникновении проблем используйте команду /status для проверки настроек.",
+                parse_mode="Markdown",
+                reply_markup=keyboard
             )
         else:
             await bot.send_message(
                 chat_id=chat_id,
-                text="Неизвестная команда. Используйте /help для получения списка доступных команд."
+                text="🤔 Неизвестная команда. Используйте /help для получения списка доступных команд.",
+                reply_markup=keyboard
             )
     except Exception as e:
         print(f"Ошибка при обработке команды {command}: {str(e)}")
         if chat_id:
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"Произошла ошибка при обработке команды: {str(e)}"
+                text=f"Произошла ошибка при обработке команды: {str(e)}",
+                reply_markup=get_main_keyboard()
             )
 
 # Задачи, выполняющиеся в фоновом режиме
@@ -512,6 +599,9 @@ async def setup_webhook():
                 print("✅ Вебхук успешно настроен!")
             else:
                 print(f"❌ Ошибка настройки вебхука: {response.json()}")
+            
+            # Настраиваем меню команд
+            await setup_bot_commands()
         else:
             print("⚠️ RENDER_EXTERNAL_URL не установлен. Невозможно настроить вебхук автоматически.")
             print("⚠️ Вебхук не настроен - для работы используйте ручное тестирование через эндпоинт /telegram/webhook")
