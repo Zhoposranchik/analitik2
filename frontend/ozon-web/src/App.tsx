@@ -448,19 +448,129 @@ function App() {
     roi_data: [] as number[]
   });
 
-  // Функция для получения токенов API от бота (перемещена выше)
+  // Функции для расчетов
+  const calculateMargin = (price: number, cost: number): number => {
+    if (cost === 0) return 0;
+    return ((price - cost) / price) * 100;
+  };
+  
+  const calculateROI = (price: number, cost: number): number => {
+    if (cost === 0) return 0;
+    return ((price - cost) / cost) * 100;
+  };
+
+  // Состояние для себестоимости товаров
+  const [productCosts, setProductCosts] = useState<Array<{product_id: number, cost: number}>>([]);
+
+  // Функция для получения аналитики с API
+  const fetchAnalytics = () => {
+    if (!isApiAvailable) {
+      setError('API сервер недоступен. Невозможно получить данные аналитики.');
+      return Promise.reject(new Error('API_UNAVAILABLE'));
+    }
+    
+    if (!isAuthenticated && !telegramUser) {
+      setError('Необходимо авторизоваться через Telegram для получения данных.');
+      return Promise.reject(new Error('NOT_AUTHENTICATED'));
+    }
+    
+    const apiUrl = telegramUser 
+      ? `${API_URL}/api/analytics?period=${selectedPeriod}&telegram_id=${telegramUser.id}`
+      : `${API_URL}/analytics?period=${selectedPeriod}`;
+    
+    const headers: HeadersInit = telegramUser ? {} : {
+      'X-API-Key': localStorage.getItem('apiKey') || ''
+    };
+    
+    return fetchApi(apiUrl, { headers })
+      .then(data => {
+        setAnalyticsData(data);
+        setError(null);
+        return data;
+      })
+      .catch(err => {
+        if (err.message === 'API_UNAVAILABLE') {
+          setIsApiAvailable(false);
+          setError('API сервер недоступен. Невозможно получить данные аналитики.');
+        } else {
+          console.error('Ошибка при получении аналитики:', err);
+          setError('Ошибка при получении данных аналитики. Пожалуйста, попробуйте позже.');
+        }
+        throw err;
+      });
+  };
+
+  // Функция для получения списка товаров с API
+  const fetchProducts = () => {
+    if (!isApiAvailable) {
+      setError('API сервер недоступен. Невозможно получить список товаров.');
+      return Promise.reject(new Error('API_UNAVAILABLE'));
+    }
+    
+    if (!isAuthenticated && !telegramUser) {
+      setError('Необходимо авторизоваться через Telegram для получения данных.');
+      return Promise.reject(new Error('NOT_AUTHENTICATED'));
+    }
+    
+    const apiUrl = telegramUser 
+      ? `${API_URL}/api/products?period=${selectedPeriod}&telegram_id=${telegramUser.id}`
+      : `${API_URL}/products?period=${selectedPeriod}`;
+    
+    const headers: HeadersInit = telegramUser ? {} : {
+      'X-API-Key': localStorage.getItem('apiKey') || ''
+    };
+    
+    return fetchApi(apiUrl, { headers })
+      .then(data => {
+        if (data && data.result && Array.isArray(data.result.items)) {
+          const productsWithCosts = data.result.items.map((product: any) => {
+            // Ищем сохраненную себестоимость для этого товара
+            const savedCost = productCosts.find((pc: {product_id: number, cost: number}) => pc.product_id === product.product_id);
+            
+            return {
+              ...product,
+              cost: savedCost ? savedCost.cost : 0,
+              margin: calculateMargin(product.price, savedCost ? savedCost.cost : 0),
+              roi: calculateROI(product.price, savedCost ? savedCost.cost : 0)
+            };
+          });
+          
+          setProducts(productsWithCosts);
+          setError(null);
+          return productsWithCosts;
+        } else {
+          throw new Error('Неверный формат данных');
+        }
+      })
+      .catch(err => {
+        if (err.message === 'API_UNAVAILABLE') {
+          setIsApiAvailable(false);
+          setError('API сервер недоступен. Невозможно получить список товаров.');
+        } else {
+          console.error('Ошибка при получении списка товаров:', err);
+          setError('Ошибка при получении списка товаров. Пожалуйста, попробуйте позже.');
+        }
+        throw err;
+      });
+  };
+
+  // Функция для получения токенов API от бота
   const fetchUserTokensFromBot = (userId: number) => {
     setLoading(true);
     
+    // Сохраняем Telegram ID в localStorage
+    localStorage.setItem('telegramUserId', userId.toString());
+    
     // Получаем токены от API бэкенда по ID пользователя Telegram
-    fetchApi(`${API_URL}/telegram/user/${userId}/tokens`)
+    fetchApi(`${API_URL}/api/auth/telegram/${userId}`)
       .then(data => {
-        if (data.tokens) {
+        if (data && data.ozon_api_token && data.ozon_client_id) {
           const tokens: ApiTokens = {
-            ozon_api_token: data.tokens.ozon_api_token || '',
-            ozon_client_id: data.tokens.ozon_client_id || '',
-            telegram_bot_token: data.tokens.telegram_bot_token || '',
-            telegram_chat_id: data.tokens.telegram_chat_id || ''
+            ozon_api_token: data.ozon_api_token,
+            ozon_client_id: data.ozon_client_id,
+            // Оставляем пустыми, так как их не нужно вводить в настройках
+            telegram_bot_token: '',
+            telegram_chat_id: ''
           };
           
           // Сохраняем API ключ в localStorage
@@ -470,6 +580,11 @@ function App() {
           
           // Сохраняем токены
           saveTokens(tokens);
+          setApiTokens(tokens);
+          setIsAuthenticated(true);
+          
+          // Загружаем данные с API после успешной авторизации
+          refreshData();
           
           setError(null);
         } else {
@@ -480,7 +595,13 @@ function App() {
       })
       .catch(err => {
         console.error('Ошибка при получении токенов:', err);
-        setError('Ошибка при получении токенов API. Пожалуйста, попробуйте позже.');
+        if (err.response && err.response.status === 404) {
+          setError('Пользователь не найден или не установлены API токены. Пожалуйста, настройте токены в боте Telegram.');
+        } else if (err.response && err.response.status === 400) {
+          setError('Токены недействительны или устарели. Пожалуйста, обновите их в боте Telegram.');
+        } else {
+          setError('Ошибка при получении токенов API. Пожалуйста, попробуйте позже.');
+        }
         setIsAuthenticated(false);
         setLoading(false);
       });
@@ -512,10 +633,38 @@ function App() {
       setIsApiAvailable(isAvailable);
       if (!isAvailable) {
         setError('API сервер недоступен. Пожалуйста, проверьте подключение и перезагрузите страницу.');
+      } else {
+        // Инициализируем Telegram WebApp если возможно
+        initTelegramWebApp();
+        
+        // Проверяем наличие сохраненного Telegram ID в localStorage
+        const savedTelegramUserId = localStorage.getItem('telegramUserId');
+        if (savedTelegramUserId) {
+          // Если есть Telegram ID, но нет пользователя Telegram (не в WebApp)
+          // то получаем токены по сохраненному ID
+          if (!telegramUser) {
+            fetchUserTokensFromBot(parseInt(savedTelegramUserId, 10));
+          }
+        }
       }
     };
     
     checkApi();
+    
+    // Устанавливаем интервал для периодической проверки доступности API
+    const apiCheckInterval = setInterval(async () => {
+      const isAvailable = await checkApiAvailability();
+      if (isAvailable !== isApiAvailable) {
+        setIsApiAvailable(isAvailable);
+        if (isAvailable) {
+          setError(null);
+        } else {
+          setError('API сервер недоступен. Пожалуйста, проверьте подключение и перезагрузите страницу.');
+        }
+      }
+    }, 30000); // Проверяем каждые 30 секунд
+    
+    return () => clearInterval(apiCheckInterval);
   }, []);
 
   useEffect(() => {
@@ -746,55 +895,25 @@ function App() {
     );
   };
 
-  // Функция обновления данных
+  // Обновление данных при изменении периода
+  useEffect(() => {
+    if (isAuthenticated || telegramUser) {
+      refreshData();
+    }
+  }, [selectedPeriod]);
+  
+  // Функция для обновления всех данных
   const refreshData = () => {
-    if (!isAuthenticated) {
-      alert('Необходимо ввести API токен Ozon через Telegram бота');
-      return;
-    }
-    
-    if (!isApiAvailable) {
-      alert('API сервер недоступен. Обновление данных невозможно.');
-      return;
-    }
-    
     setLoading(true);
-    setError(null);
     
-    // Параметры запроса в зависимости от выбранного периода
-    const params = new URLSearchParams({
-      period: selectedPeriod
-    });
-    
-    // Добавляем API ключ в запрос
-    const apiKey = localStorage.getItem('apiKey');
-    if (apiKey) {
-      params.append('api_key', apiKey);
-    }
-    
-    fetchApi(`${API_URL}/products?${params.toString()}`, {
-      headers: {
-        'X-API-Key': apiKey || ''
-      }
-    })
-      .then(data => {
-        if (data.result && Array.isArray(data.result.items)) {
-          setProducts(data.result.items);
-        } else {
-          setProducts([]);
-          console.warn('Неожиданный формат данных:', data);
-        }
+    // Получаем аналитику и товары (последовательно)
+    fetchAnalytics()
+      .then(() => fetchProducts())
+      .then(() => {
+        setLoading(false);
       })
       .catch(err => {
-        if (err.message === 'API_UNAVAILABLE') {
-          setIsApiAvailable(false);
-          setError('API сервер недоступен. Работаем в оффлайн режиме с демо-данными.');
-        } else {
-          console.error('Ошибка при загрузке товаров:', err);
-          setError(`Не удалось загрузить товары: ${err.message}`);
-        }
-      })
-      .finally(() => {
+        console.error('Ошибка при обновлении данных:', err);
         setLoading(false);
       });
   };
@@ -1138,45 +1257,65 @@ function App() {
           <div className="settings-container">
             <h1>Настройки</h1>
             <div className="settings-form">
-              <form onSubmit={handleSettingsSubmit}>
-                <div className="form-group">
-                  <label>API токен Ozon</label>
-                  <input 
-                    type="text" 
-                    placeholder="Введите API токен" 
-                    value={apiTokens.ozon_api_token} 
-                    onChange={(e) => setApiTokens({...apiTokens, ozon_api_token: e.target.value})}
-                    required
-                  />
+              <div className="telegram-auth-container">
+                <div className="telegram-auth-info">
+                  <h2>Авторизация через Telegram</h2>
+                  <p>
+                    Для работы с API Ozon необходимо получить токены через Telegram бота. 
+                    Пожалуйста, используйте бота <a href="https://t.me/xyezonbot/shmazon" target="_blank" rel="noopener noreferrer">@xyezonbot</a> для настройки токенов.
+                  </p>
+                  <div className="telegram-instructions">
+                    <h3>Как настроить токены:</h3>
+                    <ol>
+                      <li>Откройте бота <a href="https://t.me/xyezonbot/shmazon" target="_blank" rel="noopener noreferrer">@xyezonbot</a></li>
+                      <li>Отправьте команду /set_token</li>
+                      <li>Следуйте инструкциям бота для ввода API токена и Client ID Ozon</li>
+                      <li>После успешной настройки токенов, обновите эту страницу</li>
+                    </ol>
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label>Client ID Ozon</label>
-                  <input 
-                    type="text" 
-                    placeholder="Введите Client ID" 
-                    value={apiTokens.ozon_client_id} 
-                    onChange={(e) => setApiTokens({...apiTokens, ozon_client_id: e.target.value})}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Telegram Bot Token</label>
-                  <input 
-                    type="text" 
-                    placeholder="Введите токен Telegram бота" 
-                    value={apiTokens.telegram_bot_token || ''} 
-                    onChange={(e) => setApiTokens({...apiTokens, telegram_bot_token: e.target.value})}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Telegram Chat ID</label>
-                  <input 
-                    type="text" 
-                    placeholder="Введите Chat ID" 
-                    value={apiTokens.telegram_chat_id || ''} 
-                    onChange={(e) => setApiTokens({...apiTokens, telegram_chat_id: e.target.value})}
-                  />
-                </div>
+                
+                {telegramUser ? (
+                  <div className="telegram-status">
+                    <h3>Статус подключения</h3>
+                    <p className="telegram-user-info">
+                      Вы авторизованы как: <strong>{telegramUser.username || `Пользователь ${telegramUser.id}`}</strong>
+                    </p>
+                    <p>
+                      {isAuthenticated ? 
+                        "✅ API токены настроены и готовы к использованию" : 
+                        "❌ API токены не настроены. Пожалуйста, используйте бота для настройки токенов"}
+                    </p>
+                    {isAuthenticated && (
+                      <div className="token-info">
+                        <p>Client ID: <code>{apiTokens.ozon_client_id}</code></p>
+                        <p>API Token: <code>{apiTokens.ozon_api_token.substring(0, 5)}...{apiTokens.ozon_api_token.substring(apiTokens.ozon_api_token.length - 5)}</code></p>
+                      </div>
+                    )}
+                    <button type="button" className="refresh-button" onClick={() => fetchUserTokensFromBot(telegramUser.id)}>
+                      Обновить токены
+                    </button>
+                  </div>
+                ) : (
+                  <div className="telegram-login">
+                    <p>Для использования приложения, пожалуйста, введите ваш Telegram ID:</p>
+                    <form onSubmit={(e) => {
+                      e.preventDefault();
+                      const input = e.currentTarget.querySelector('input[type="number"]') as HTMLInputElement;
+                      const telegramId = parseInt(input.value);
+                      setTelegramUser({id: telegramId});
+                      fetchUserTokensFromBot(telegramId);
+                    }}>
+                      <input type="number" placeholder="Введите Telegram ID" required />
+                      <button type="submit" className="report-button">Авторизоваться</button>
+                    </form>
+                    <p className="hint">Вы можете узнать свой Telegram ID, отправив команду /status боту @xyezonbot</p>
+                  </div>
+                )}
+              </div>
+              
+              <div className="other-settings">
+                <h3>Настройки приложения</h3>
                 <div className="form-group">
                   <label>Порог маржинальности для уведомлений (%)</label>
                   <input 
@@ -1188,11 +1327,17 @@ function App() {
                     onChange={(e) => setNotificationThreshold(Number(e.target.value))}
                   />
                 </div>
-                <div className="form-actions">
-                  <button type="submit" className="report-button">Сохранить настройки</button>
-                  <button type="button" className="delete-button" onClick={removeTokens}>Удалить токены</button>
+                <div className="form-group">
+                  <label>Тема приложения</label>
+                  <button 
+                    type="button" 
+                    className="theme-button" 
+                    onClick={toggleTheme}
+                  >
+                    {isDarkTheme ? 'Переключить на светлую тему' : 'Переключить на темную тему'}
+                  </button>
                 </div>
-              </form>
+              </div>
             </div>
           </div>
         )}

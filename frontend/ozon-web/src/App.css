@@ -552,3 +552,147 @@ h1, h2, h3, h4 {
     left: 0;
   }
 }
+
+/* Новые стили для страницы настроек с авторизацией через Telegram */
+.telegram-auth-container {
+  margin-bottom: 30px;
+}
+
+.telegram-auth-info {
+  margin-bottom: 20px;
+}
+
+.telegram-auth-info h2 {
+  color: var(--primary-color);
+  margin-bottom: 10px;
+}
+
+.telegram-auth-info p {
+  margin-bottom: 15px;
+  line-height: 1.5;
+}
+
+.telegram-auth-info a {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.telegram-auth-info a:hover {
+  text-decoration: underline;
+}
+
+.telegram-instructions {
+  background-color: rgba(41, 128, 185, 0.1);
+  border-left: 4px solid var(--primary-color);
+  padding: 15px;
+  border-radius: 4px;
+  margin-top: 15px;
+}
+
+.telegram-instructions h3 {
+  margin-top: 0;
+  color: var(--text-color);
+}
+
+.telegram-instructions ol {
+  margin-left: 20px;
+  padding-left: 0;
+}
+
+.telegram-instructions li {
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.telegram-status {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
+.telegram-status h3 {
+  margin-top: 0;
+  color: var(--text-color);
+}
+
+.telegram-user-info {
+  margin-bottom: 10px;
+}
+
+.token-info {
+  background-color: rgba(46, 204, 113, 0.1);
+  border-left: 4px solid #2ecc71;
+  padding: 10px 15px;
+  margin: 15px 0;
+  border-radius: 4px;
+}
+
+.token-info code {
+  background-color: var(--input-bg);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.telegram-login {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
+.telegram-login p {
+  margin-bottom: 15px;
+}
+
+.telegram-login form {
+  display: flex;
+  gap: 10px;
+}
+
+.telegram-login input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--input-bg);
+  color: var(--text-color);
+}
+
+.hint {
+  font-size: 0.9em;
+  color: var(--text-secondary);
+  margin-top: 10px;
+}
+
+.other-settings {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
+.other-settings h3 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: var(--text-color);
+}
+
+.theme-button {
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.theme-button:hover {
+  background-color: #2980b9;
+}
